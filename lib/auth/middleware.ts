@@ -8,12 +8,16 @@ export interface AuthenticatedRequest extends NextRequest {
 export async function authenticate(
   request: NextRequest
 ): Promise<{ user: JwtPayload | null; error: NextResponse | null }> {
+  // Prefer the Authorization header (used by API clients), fall back to the
+  // accessToken cookie (used by the browser after sign-in / OAuth).
   const authHeader = request.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return { user: null, error: null };
+  let token: string | undefined;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    token = authHeader.slice("Bearer ".length).trim();
+  } else {
+    token = request.cookies.get("accessToken")?.value;
   }
 
-  const token = authHeader.split(" ")[1];
   if (!token) {
     return { user: null, error: null };
   }

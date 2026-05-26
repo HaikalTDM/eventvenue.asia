@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export async function POST(request: NextRequest) {
+export async function POST(_request: NextRequest) {
   const response = NextResponse.json({ success: true });
-  response.cookies.set("refreshToken", "", {
+  const cookieOpts = {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    sameSite: "lax" as const,
     path: "/",
     maxAge: 0,
-  });
+  };
+  response.cookies.set("refreshToken", "", cookieOpts);
+  response.cookies.set("accessToken", "", cookieOpts);
   return response;
 }
