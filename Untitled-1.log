@@ -1,0 +1,21 @@
+
+> eventvenue-asia@0.1.0 predev
+> node -e "require('fs').rmSync('.next',{recursive:true,force:true})"
+
+
+> eventvenue-asia@0.1.0 dev
+> next dev --turbopack
+
+ ⚠ Port 3000 is in use by process 40928, using available port 3001 instead.
+   ▲ Next.js 15.5.18 (Turbopack)
+   - Local:        http://localhost:3001
+   - Network:      http://100.121.66.67:3001
+
+ ✓ Starting...
+Creating turbopack project { dir: 'C:\\Projects\\eventvenue-new', testMode: true }
+ ✓ Ready in 1825ms
+
+
+<bash_metadata>
+bash tool terminated command after exceeding timeout 8000 ms. If this command is expected to take longer and is not waiting for interactive input, retry with a larger timeout value in milliseconds.
+</bash_metadata>
