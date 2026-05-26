@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
 import { authenticate } from "@/lib/auth/middleware";
 import { handleApiError, notFound } from "@/lib/utils/errors";
-import { eq, ilike } from "drizzle-orm";
+import { eq, and, ilike, type SQL } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,18 +13,23 @@ export async function GET(request: NextRequest) {
 
     const url = new URL(request.url);
     const search = url.searchParams.get("search");
+    const includeMock = url.searchParams.get("includeMock") === "true";
     const page = parseInt(url.searchParams.get("page") || "1", 10);
     const limit = parseInt(url.searchParams.get("limit") || "20", 10);
 
-    let baseQuery = db.select().from(schema.users);
-    if (search) {
-      baseQuery = baseQuery.where(
-        ilike(schema.users.name, `%${search}%`)
-      ) as typeof baseQuery;
-    }
+    // Hide seeded mock users from the production view by default. Pass
+    // ?includeMock=true to inspect the demo data.
+    const conditions: SQL[] = [];
+    if (!includeMock) conditions.push(eq(schema.users.isMock, false));
+    if (search) conditions.push(ilike(schema.users.name, `%${search}%`));
 
-    const total = await db.$count(schema.users);
-    const users = await baseQuery
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const total = await db.$count(schema.users, where);
+    const users = await db
+      .select()
+      .from(schema.users)
+      .where(where)
       .orderBy(schema.users.createdAt)
       .limit(limit)
       .offset((page - 1) * limit);

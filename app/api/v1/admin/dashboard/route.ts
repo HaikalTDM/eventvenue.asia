@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
 import { authenticate } from "@/lib/auth/middleware";
-import { handleApiError, notFound } from "@/lib/utils/errors";
-import { eq } from "drizzle-orm";
+import { handleApiError } from "@/lib/utils/errors";
+import { eq, and } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,11 +11,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
     }
 
+    // Counts exclude seeded mock rows (isMock=true) so admins see real
+    // production activity. The mock data stays in the DB as a demo
+    // safety net but is hidden from production-facing views.
     const [userCount, vendorCount, listingCount, pendingVendorCount, bookingCount] = await Promise.all([
-      db.$count(schema.users),
-      db.$count(schema.vendorProfiles),
-      db.$count(schema.listings),
-      db.$count(schema.vendorProfiles, eq(schema.vendorProfiles.verificationStatus, "pending")),
+      db.$count(schema.users, eq(schema.users.isMock, false)),
+      db.$count(schema.vendorProfiles, eq(schema.vendorProfiles.isMock, false)),
+      db.$count(schema.listings, eq(schema.listings.isMock, false)),
+      db.$count(
+        schema.vendorProfiles,
+        and(
+          eq(schema.vendorProfiles.verificationStatus, "pending"),
+          eq(schema.vendorProfiles.isMock, false)
+        )!
+      ),
       db.$count(schema.bookings),
     ]);
 

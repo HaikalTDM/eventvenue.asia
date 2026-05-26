@@ -26,7 +26,10 @@ export async function GET(request: NextRequest) {
       sort, page, limit,
     } = parsed.data;
 
-    const conditions: SQL[] = [eq(schema.listings.status, "active")];
+    const conditions: SQL[] = [
+      eq(schema.listings.status, "active"),
+      eq(schema.listings.isMock, false),
+    ];
 
     if (type) conditions.push(eq(schema.listings.listingType, type));
     if (location) conditions.push(ilike(schema.listings.location, `%${location}%`));

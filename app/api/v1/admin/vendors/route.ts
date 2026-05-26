@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
 import { authenticate } from "@/lib/auth/middleware";
 import { handleApiError, notFound } from "@/lib/utils/errors";
-import { eq, desc, ilike } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,10 +13,13 @@ export async function GET(request: NextRequest) {
 
     const url = new URL(request.url);
     const status = url.searchParams.get("status");
-    const search = url.searchParams.get("search");
+    const includeMock = url.searchParams.get("includeMock") === "true";
 
-    let conditions = [];
+    const conditions = [];
+    if (!includeMock) conditions.push(eq(schema.vendorProfiles.isMock, false));
     if (status) conditions.push(eq(schema.vendorProfiles.verificationStatus, status as "pending" | "approved" | "rejected"));
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
 
     const vendors = await db
       .select({
@@ -33,7 +36,7 @@ export async function GET(request: NextRequest) {
       })
       .from(schema.vendorProfiles)
       .innerJoin(schema.users, eq(schema.vendorProfiles.userId, schema.users.id))
-      .where(conditions.length > 0 ? (conditions.length === 1 ? conditions[0] : undefined) : undefined)
+      .where(where)
       .orderBy(desc(schema.vendorProfiles.createdAt))
       .limit(50);
 
