@@ -20,20 +20,24 @@ docker compose up -d postgres
 # DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eventvenue
 ```
 
-### 2. Apply the migration
+### 2. Apply the schema changes
 
-The Phase A schema changes added two tables (`email_verifications`,
-`password_resets`). Apply them:
-
-```powershell
-npx drizzle-kit migrate
-```
-
-If you've never pushed the schema before, run this first:
+The Phase A schema added two tables (`email_verifications`,
+`password_resets`). The project doesn't have a versioned migration history
+yet, so apply schema changes by diffing directly against the live DB:
 
 ```powershell
 npx drizzle-kit push
 ```
+
+This compares `lib/db/schema/index.ts` to the database connected via
+`DATABASE_URL` and applies only what's missing. On a fresh DB it creates
+every table; on a DB that's already seeded it adds only the two new
+tables.
+
+> A versioned migration workflow (`drizzle-kit generate` +
+> `drizzle-kit migrate`) will be set up properly in a later phase, once
+> the prod DB is on its own connection string distinct from dev.
 
 ### 3. Set verification gate to OFF (for now)
 
