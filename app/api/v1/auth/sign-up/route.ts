@@ -139,6 +139,14 @@ export async function POST(request: NextRequest) {
       maxAge: 60 * 60 * 24 * 7,
     });
 
+    response.cookies.set("accessToken", accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: parseInt(process.env.JWT_EXPIRES_IN || "3600", 10),
+    });
+
     return response;
   } catch (error) {
     return handleApiError(error);
