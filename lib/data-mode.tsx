@@ -10,14 +10,14 @@ type DataModeContextType = {
 };
 
 const DataModeContext = createContext<DataModeContextType>({
-  mode: "live",
+  mode: "mock",
   setMode: () => {},
 });
 
 const STORAGE_KEY = "ev_data_mode";
 
 export function DataModeProvider({ children }: { children: ReactNode }) {
-  const [mode, setModeState] = useState<DataMode>("live");
+  const [mode, setModeState] = useState<DataMode>("mock");
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
