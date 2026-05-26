@@ -8,6 +8,8 @@ import { useDataMode } from "@/lib/data-mode";
 import { mockVenues, amenityOptions, eventTypeOptions } from "@/lib/mock-data";
 import SidebarFilter from "@/components/SidebarFilter";
 import VenueGrid from "@/components/VenueGrid";
+import LocationCascade, { type LocationSelection } from "@/components/LocationCascade";
+import GeolocationFilter, { type GeoFilterValue } from "@/components/GeolocationFilter";
 
 function mapListingToVenue(item: ApiListing): Venue {
   return {
@@ -67,6 +69,16 @@ export default function VenueGridWithFilters({
     eventTypes: [],
     showHalalOnly: false,
   });
+  const [locationSelection, setLocationSelection] = useState<LocationSelection>({
+    state: null,
+    city: null,
+    district: null,
+  });
+  const [geoFilter, setGeoFilter] = useState<GeoFilterValue>({
+    latitude: null,
+    longitude: null,
+    radiusKm: 10,
+  });
 
   const locationKeyMap: Record<string, string> = {
     kl: "Kuala Lumpur",
@@ -116,6 +128,20 @@ export default function VenueGridWithFilters({
         if (locationStr) {
           params.location = locationStr;
         }
+      }
+
+      if (locationSelection.state) params.state = locationSelection.state;
+      if (locationSelection.city) params.city = locationSelection.city;
+      if (locationSelection.district) params.district = locationSelection.district;
+
+      if (
+        geoFilter.latitude !== null &&
+        geoFilter.longitude !== null
+      ) {
+        params.lat = String(geoFilter.latitude);
+        params.lng = String(geoFilter.longitude);
+        params.radius = String(geoFilter.radiusKm);
+        params.sort = "distance";
       }
 
       if (search.halalOnly) {
@@ -250,12 +276,28 @@ export default function VenueGridWithFilters({
         </div>
 
         <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
-          <SidebarFilter
-            amenities={amenityFilterOptions}
-            eventTypes={eventTypeFilterOptions}
-            filters={filters}
-            onFiltersChange={setFilters}
-          />
+          <div className="flex w-full shrink-0 flex-col gap-4 lg:w-72">
+            <div className="rounded-2xl border border-gray-200 bg-white p-4">
+              <h3 className="text-sm font-semibold text-gray-900">Region</h3>
+              <p className="mt-1 text-xs text-gray-500">
+                Drill down by state, city, then district.
+              </p>
+              <div className="mt-3">
+                <LocationCascade
+                  value={locationSelection}
+                  onChange={setLocationSelection}
+                  className="grid-cols-1"
+                />
+              </div>
+            </div>
+            <GeolocationFilter value={geoFilter} onChange={setGeoFilter} />
+            <SidebarFilter
+              amenities={amenityFilterOptions}
+              eventTypes={eventTypeFilterOptions}
+              filters={filters}
+              onFiltersChange={setFilters}
+            />
+          </div>
           <div className="min-w-0 flex-1">
             {loading ? (
               <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
