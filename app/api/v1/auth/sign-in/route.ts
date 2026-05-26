@@ -42,6 +42,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Verification gate: opt-in via EMAIL_VERIFICATION_REQUIRED. Admins are
+    // exempt because they're bootstrapped via the create-admin CLI.
+    if (
+      process.env.EMAIL_VERIFICATION_REQUIRED === "true" &&
+      !user.isVerified &&
+      user.role !== "admin"
+    ) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "EMAIL_NOT_VERIFIED",
+            message: "Please verify your email before signing in. Check your inbox for the verification link.",
+          },
+        },
+        { status: 403 }
+      );
+    }
+
     const vendorProfile = await db.query.vendorProfiles.findFirst({
       where: (vp, { eq }) => eq(vp.userId, user.id),
     });

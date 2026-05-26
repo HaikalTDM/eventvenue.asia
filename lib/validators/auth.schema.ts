@@ -4,7 +4,7 @@ export const signUpSchema = z.object({
   name: z.string().min(1, "Name is required").max(255),
   email: z.string().email("Invalid email").max(255),
   password: z.string().min(8, "Password must be at least 8 characters").max(128),
-  phone: z.string().max(20).optional(),
+  phone: z.string().min(1, "Phone is required").max(20),
 });
 
 export const signInSchema = z.object({
