@@ -18,6 +18,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ user: null });
   }
 
+  // Suspended users (including rejected vendors, see admin reject action)
+  // must lose access immediately on the next session check. Returning
+  // user=null here causes the auth context to treat them as logged out
+  // and the layout to redirect to the appropriate sign-in page.
+  if (dbUser.isSuspended) {
+    return NextResponse.json({ user: null });
+  }
+
   const vendorProfile = await db.query.vendorProfiles.findFirst({
     where: (vp, { eq }) => eq(vp.userId, dbUser.id),
   });
@@ -34,6 +42,7 @@ export async function GET(request: NextRequest) {
       vendorId: vendorProfile?.id || null,
       vendorType: vendorProfile?.vendorType || null,
       vendorName: vendorProfile?.businessName || null,
+      verificationStatus: vendorProfile?.verificationStatus || null,
       createdAt: dbUser.createdAt,
     },
   });

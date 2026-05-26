@@ -74,13 +74,23 @@ export async function PUT(request: NextRequest) {
         .set({ verificationStatus: "approved", verificationBadge: "verified" })
         .where(eq(schema.vendorProfiles.id, vendorId));
       await db.update(schema.users)
-        .set({ isVerified: true })
+        .set({ isVerified: true, isSuspended: false, suspendedReason: null })
         .where(eq(schema.users.id, vendor.userId));
     } else {
       const body = await request.json().catch(() => ({}));
+      const reason = typeof body?.reason === "string" ? body.reason : null;
       await db.update(schema.vendorProfiles)
         .set({ verificationStatus: "rejected" })
         .where(eq(schema.vendorProfiles.id, vendorId));
+      // Suspend the user account so the rejected vendor cannot reach
+      // /vendor/dashboard or any authenticated route. The next /auth/session
+      // poll (or any new sign-in) will be rejected.
+      await db.update(schema.users)
+        .set({
+          isSuspended: true,
+          suspendedReason: reason || "Vendor application was rejected.",
+        })
+        .where(eq(schema.users.id, vendor.userId));
     }
 
     return NextResponse.json({ success: true });
