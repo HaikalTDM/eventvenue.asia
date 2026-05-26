@@ -104,24 +104,31 @@ export default function VendorRegisterPage() {
   const handleSubmit = async () => {
     setLoading(true);
     try {
+      // Map UI vendorType ("venue" | "service") to the schema enum
+      // ("venue_owner" | "service_provider") expected by the API.
+      const apiVendorType =
+        vendorType === "venue" ? "venue_owner" : "service_provider";
+
       const res = await fetch("/api/v1/vendors/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          vendorType,
+          vendorType: apiVendorType,
           businessName,
           businessDescription: description || undefined,
           businessLocation: location,
           serviceCategory: vendorType === "service" ? serviceCategory || null : null,
           user: { name, email, phone, password },
-          documents: documents.map((d) => ({ docType: "business_license", fileUrl: "pending-upload" })),
+          // documents excluded for now: the vendor_documents.fileUrl is
+          // required and must be a real URL. R2 upload comes in Phase C.
         }),
       });
       if (res.ok) {
         router.push("/vendor/dashboard");
       } else {
-        const err = await res.json();
-        alert(err?.error?.message || "Registration failed");
+        const err = await res.json().catch(() => null);
+        const detail = err?.error?.details?.[0]?.message;
+        alert(detail || err?.error?.message || "Registration failed");
       }
     } catch {
       alert("Network error. Please try again.");
