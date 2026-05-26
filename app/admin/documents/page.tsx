@@ -15,16 +15,7 @@ type Document = {
   notes?: string;
 };
 
-const mockDocuments: Document[] = [
-  { id: "d-1", vendorName: "Farah Lim", businessName: "Elegant Events Hall", docType: "Halal Certificate (JAKIM)", fileName: "halal-cert-2025.pdf", uploadedAt: "2 hours ago", status: "pending" },
-  { id: "d-2", vendorName: "Farah Lim", businessName: "Elegant Events Hall", docType: "SSM Business Registration", fileName: "ssm-registration.pdf", uploadedAt: "2 hours ago", status: "pending" },
-  { id: "d-3", vendorName: "Raj Kumar", businessName: "Raj's Premium Catering", docType: "SSM Business Registration", fileName: "raj-ssm-cert.pdf", uploadedAt: "5 hours ago", status: "pending" },
-  { id: "d-4", vendorName: "Raj Kumar", businessName: "Raj's Premium Catering", docType: "Food Handler License", fileName: "food-handler-license.jpg", uploadedAt: "5 hours ago", status: "pending" },
-  { id: "d-5", vendorName: "Azman Ismail", businessName: "Skyview Rooftop KL", docType: "Premises License", fileName: "premises-license-2025.pdf", uploadedAt: "2 days ago", status: "pending" },
-  { id: "d-6", vendorName: "Azman Ismail", businessName: "Skyview Rooftop KL", docType: "Halal Certificate (JAKIM)", fileName: "jakim-halal.pdf", uploadedAt: "2 days ago", status: "pending" },
-  { id: "d-7", vendorName: "Hassan Catering", businessName: "Hassan Premium Catering", docType: "Halal Certificate (JAKIM)", fileName: "hassan-halal-renewal.pdf", uploadedAt: "4 days ago", status: "approved", notes: "Verified — valid until Dec 2025" },
-  { id: "d-8", vendorName: "Aisha Rahman", businessName: "The Majestic KL", docType: "SSM Business Registration", fileName: "majestic-ssm.pdf", uploadedAt: "1 week ago", status: "approved", notes: "Verified" },
-];
+const mockDocuments: Document[] = [];
 
 export default function AdminDocumentsPage() {
   const [documents, setDocuments] = useState(mockDocuments);

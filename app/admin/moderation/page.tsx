@@ -13,13 +13,7 @@ type FlaggedItem = {
   status: "pending" | "removed" | "dismissed";
 };
 
-const mockFlagged: FlaggedItem[] = [
-  { id: "f-1", type: "review", content: "This place is terrible, worst experience ever. The staff were completely incompetent and rude...", reportedBy: "System (auto-flagged)", reason: "Potentially abusive language", target: "Skyline Rooftop Lounge", reportedAt: "1 hour ago", status: "pending" },
-  { id: "f-2", type: "review", content: "SCAM! Don't book here. They took my deposit and cancelled last minute with no refund.", reportedBy: "Aisha Rahman (Vendor)", reason: "False claims / defamation", target: "Grand Ballroom at The Majestic KL", reportedAt: "3 hours ago", status: "pending" },
-  { id: "f-3", type: "listing", content: "Venue listing with misleading photos (stock images used instead of actual venue)", reportedBy: "ahmad.razak@company.com", reason: "Misleading content", target: "Paradise Garden Venue", reportedAt: "1 day ago", status: "pending" },
-  { id: "f-4", type: "review", content: "Great venue but overpriced for what you get. Food was mediocre at best.", reportedBy: "Hassan Catering (Vendor)", reason: "Competitor review", target: "Heritage Hall JB", reportedAt: "2 days ago", status: "dismissed" },
-  { id: "f-5", type: "message", content: "User sending promotional spam messages to multiple vendors", reportedBy: "System (auto-flagged)", reason: "Spam / unsolicited promotion", target: "Multiple vendors", reportedAt: "3 days ago", status: "removed" },
-];
+const mockFlagged: FlaggedItem[] = [];
 
 export default function AdminModerationPage() {
   const [items, setItems] = useState(mockFlagged);
