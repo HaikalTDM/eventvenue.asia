@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
 import { authenticate } from "@/lib/auth/middleware";
 import { handleApiError } from "@/lib/utils/errors";
-import { eq } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
@@ -75,7 +75,12 @@ export async function DELETE(request: NextRequest) {
 
     await db
       .delete(schema.favorites)
-      .where(eq(schema.favorites.customerId, user.sub) && eq(schema.favorites.listingId, listingId));
+      .where(
+        and(
+          eq(schema.favorites.customerId, user.sub),
+          eq(schema.favorites.listingId, listingId)
+        )
+      );
 
     return NextResponse.json({ success: true });
   } catch (error) {
