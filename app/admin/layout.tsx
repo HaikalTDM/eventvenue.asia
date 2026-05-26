@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+
+interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+}
 
 const navItems = [
   { href: "/admin/dashboard", label: "Overview", icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m0 0v10a1 1 0 01-1 1h-3m-6 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" },
@@ -15,6 +21,8 @@ const navItems = [
 ];
 
 function isAdminAuthenticated(): boolean {
+  // Deprecated localStorage-based check kept for backwards compat with any
+  // open session. Real check is the /api/v1/auth/session call below.
   try {
     const stored = localStorage.getItem("ev_admin_auth");
     return stored !== null;
@@ -27,30 +35,50 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const router = useRouter();
   const [isChecking, setIsChecking] = useState(true);
+  const [admin, setAdmin] = useState<AdminUser | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const isLoginPage = pathname === "/admin/login";
-  const hasSession = useRef(isAdminAuthenticated());
-
-  useLayoutEffect(() => {
-    if (!isLoginPage && !hasSession.current) {
-      router.replace("/admin/login");
-    }
-    setIsChecking(false);
-  }, [isLoginPage, router]);
 
   useEffect(() => {
-    const onPageShow = () => {
-      if (!isLoginPage && !isAdminAuthenticated()) {
-        router.replace("/admin/login");
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/v1/auth/session", { cache: "no-store" });
+        if (!res.ok) {
+          if (!cancelled && !isLoginPage) router.replace("/admin/login");
+          if (!cancelled) setIsChecking(false);
+          return;
+        }
+        const data = await res.json();
+        const u = data?.user;
+        if (!u || u.role !== "admin") {
+          if (!cancelled && !isLoginPage) router.replace("/admin/login");
+        } else if (!cancelled) {
+          setAdmin({ id: u.id, name: u.name, email: u.email, role: u.role });
+        }
+      } catch {
+        if (!cancelled && !isLoginPage) router.replace("/admin/login");
+      } finally {
+        if (!cancelled) setIsChecking(false);
       }
+    })();
+    return () => {
+      cancelled = true;
     };
-    window.addEventListener("pageshow", onPageShow);
-    return () => window.removeEventListener("pageshow", onPageShow);
-  }, [isLoginPage, router]);
+  }, [pathname, isLoginPage, router]);
 
-  const handleSignOut = () => {
-    localStorage.removeItem("ev_admin_auth");
-    hasSession.current = false;
+  const handleSignOut = async () => {
+    try {
+      await fetch("/api/v1/auth/sign-out", { method: "POST" });
+    } catch {
+      // ignore
+    }
+    try {
+      localStorage.removeItem("ev_admin_auth");
+    } catch {
+      // ignore
+    }
+    setAdmin(null);
     router.push("/admin/login");
   };
 
@@ -58,7 +86,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return <>{children}</>;
   }
 
-  if (isChecking && !hasSession.current) {
+  if (isChecking || !admin) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-900">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-600 border-t-[#EB4D4B]" />
@@ -121,11 +149,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="border-t border-gray-700 p-4">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-600 text-xs font-bold text-white">
-              A
+              {admin.name.charAt(0).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">Admin</p>
-              <p className="text-xs text-gray-400 truncate">admin@eventvenue.asia</p>
+              <p className="text-sm font-medium text-white truncate">{admin.name}</p>
+              <p className="text-xs text-gray-400 truncate">{admin.email}</p>
             </div>
           </div>
           <button

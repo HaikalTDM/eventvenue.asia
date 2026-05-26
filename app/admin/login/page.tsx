@@ -11,19 +11,33 @@ export default function AdminLoginPage() {
   const [error, setError] = useState("");
   const router = useRouter();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
-    setTimeout(() => {
-      if (email === "admin@eventvenue.asia" && password === "admin123") {
-        localStorage.setItem("ev_admin_auth", JSON.stringify({ email, role: "admin" }));
-        router.push("/admin/dashboard");
-      } else {
-        setError("Invalid credentials. Use the demo account below.");
+    try {
+      const res = await fetch("/api/v1/auth/sign-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(data?.error?.message || "Invalid email or password.");
+        return;
       }
+      const data = await res.json();
+      if (data?.user?.role !== "admin") {
+        setError("This account is not an admin. Use the customer or vendor sign-in pages.");
+        return;
+      }
+      router.push("/admin/dashboard");
+      router.refresh();
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
       setLoading(false);
-    }, 800);
+    }
   };
 
   return (
@@ -47,7 +61,7 @@ export default function AdminLoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@eventvenue.asia"
+              placeholder="admin@example.com"
               className="w-full rounded-xl border border-gray-600 bg-gray-700 px-4 py-3 text-sm text-white placeholder-gray-400 outline-none transition focus:border-[#EB4D4B] focus:ring-2 focus:ring-[#EB4D4B]/20"
             />
           </div>
@@ -75,19 +89,9 @@ export default function AdminLoginPage() {
           </button>
         </form>
 
-        <div className="mt-6 rounded-2xl border border-gray-700 bg-gray-800 p-5">
-          <p className="text-xs font-bold uppercase tracking-wider text-gray-500">Demo Account</p>
-          <button
-            onClick={() => { setEmail("admin@eventvenue.asia"); setPassword("admin123"); }}
-            className="mt-3 flex w-full items-center justify-between rounded-xl border border-gray-600 px-4 py-2.5 text-left transition-colors hover:bg-gray-700"
-          >
-            <div>
-              <p className="text-sm font-semibold text-white">Platform Admin</p>
-              <p className="text-xs text-gray-400">admin@eventvenue.asia</p>
-            </div>
-            <span className="rounded-full bg-[#EB4D4B]/20 px-2.5 py-0.5 text-xs font-medium text-[#EB4D4B]">Admin</span>
-          </button>
-        </div>
+        <p className="mt-6 text-center text-xs text-gray-500">
+          Admin accounts are created via CLI: <code className="rounded bg-gray-800 px-1.5 py-0.5 font-mono">npm run create:admin</code>
+        </p>
       </div>
     </div>
   );

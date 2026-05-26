@@ -19,13 +19,38 @@ export default function SignInPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const success = await signIn(email, password);
-    setLoading(false);
-    if (!success) {
-      setNotice("Invalid email or password.");
-      return;
+    setNotice(null);
+    try {
+      const res = await fetch("/api/v1/auth/sign-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setNotice(data?.error?.message || "Invalid email or password.");
+        setLoading(false);
+        return;
+      }
+      const data = await res.json();
+      const role = data?.user?.role;
+      // Update the AuthProvider in-memory state so the rest of the app
+      // sees the user immediately. signIn() also makes a duplicate POST,
+      // but it's idempotent and harmless.
+      await signIn(email, password);
+      if (role === "admin") {
+        router.push("/admin/dashboard");
+      } else if (role === "vendor") {
+        router.push("/vendor/dashboard");
+      } else {
+        router.push("/");
+      }
+      router.refresh();
+    } catch {
+      setNotice("Network error. Please try again.");
+    } finally {
+      setLoading(false);
     }
-    router.push("/");
   };
 
   const handleGoogle = () => {
