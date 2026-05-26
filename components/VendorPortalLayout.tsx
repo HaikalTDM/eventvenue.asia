@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useVendorAuth } from "@/lib/vendor-auth";
@@ -16,14 +16,6 @@ const navItems = [
   { href: "/vendor/settings", label: "Settings", icon: "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" },
 ];
 
-function checkVendorSession(): boolean {
-  try {
-    return localStorage.getItem("ev_vendor_auth") !== null;
-  } catch {
-    return false;
-  }
-}
-
 export default function VendorPortalLayout({
   children,
 }: {
@@ -32,14 +24,9 @@ export default function VendorPortalLayout({
   const { vendor, logout, isLoading } = useVendorAuth();
   const pathname = usePathname();
   const router = useRouter();
-  const hasSession = useRef(checkVendorSession());
 
-  useLayoutEffect(() => {
-    if (!hasSession.current) {
-      router.replace("/vendor/login");
-    }
-  }, [router]);
-
+  // Redirect to login only after the session has finished loading and we
+  // know there is no vendor. Don't gate on a legacy localStorage key.
   useEffect(() => {
     if (!isLoading && !vendor) {
       router.replace("/vendor/login");
@@ -51,7 +38,7 @@ export default function VendorPortalLayout({
     router.push("/vendor/login");
   };
 
-  if (!hasSession.current || isLoading || !vendor) {
+  if (isLoading || !vendor) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-[#EB4D4B]" />
@@ -59,8 +46,9 @@ export default function VendorPortalLayout({
     );
   }
 
-  const typeLabel = vendor.vendorType === "venue" ? "Venue Owner" : "Service Provider";
-  const typeBadgeColor = vendor.vendorType === "venue" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700";
+  const isVenue = vendor.vendorType === "venue" || vendor.vendorType === "venue_owner";
+  const typeLabel = isVenue ? "Venue Owner" : "Service Provider";
+  const typeBadgeColor = isVenue ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700";
 
   return (
     <div className="flex min-h-screen bg-gray-50">
