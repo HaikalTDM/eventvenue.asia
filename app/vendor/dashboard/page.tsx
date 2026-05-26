@@ -96,9 +96,14 @@ export default function VendorDashboardPage() {
     };
   }, [vendor]);
 
-  if (!vendor) return null;
+  if (!vendor) {
+    // Defer to VendorPortalLayout's own loading + redirect logic. Returning
+    // a wrapped layout (instead of null) lets the spinner show during the
+    // /api/v1/auth/session round-trip immediately after registration.
+    return <VendorPortalLayout><div /></VendorPortalLayout>;
+  }
 
-  const isVenue = vendor.vendorType === "venue";
+  const isVenue = vendor.vendorType === "venue" || vendor.vendorType === "venue_owner";
 
   const formatNumber = (n: number) => n.toLocaleString();
   const formatMoney = (amt: number, ccy: string) =>
