@@ -355,3 +355,27 @@ export const contentFlags = pgTable("content_flags", {
   index("idx_content_flags_status").on(table.status),
   index("idx_content_flags_target").on(table.targetType, table.targetId),
 ]);
+
+export const emailVerifications = pgTable("email_verifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: varchar("token_hash", { length: 255 }).notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_email_verifications_user_id").on(table.userId),
+  index("idx_email_verifications_expires_at").on(table.expiresAt),
+]);
+
+export const passwordResets = pgTable("password_resets", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: varchar("token_hash", { length: 255 }).notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_password_resets_user_id").on(table.userId),
+  index("idx_password_resets_expires_at").on(table.expiresAt),
+]);
