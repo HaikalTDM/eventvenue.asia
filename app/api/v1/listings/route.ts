@@ -21,7 +21,8 @@ export async function GET(request: NextRequest) {
     }
 
     const {
-      q, location, capacity, halal, amenities: amenitiesFilter,
+      q, location, state, city, district, lat, lng, radius,
+      capacity, halal, amenities: amenitiesFilter,
       eventTypes: eventTypesFilter, type, category, minPrice, maxPrice,
       sort, page, limit,
     } = parsed.data;
@@ -33,10 +34,28 @@ export async function GET(request: NextRequest) {
 
     if (type) conditions.push(eq(schema.listings.listingType, type));
     if (location) conditions.push(ilike(schema.listings.location, `%${location}%`));
+    if (state) conditions.push(eq(schema.listings.state, state));
+    if (city) conditions.push(eq(schema.listings.city, city));
+    if (district) conditions.push(eq(schema.listings.district, district));
     if (capacity) conditions.push(gte(schema.listings.capacity, capacity));
     if (halal !== undefined) conditions.push(eq(schema.listings.halalCertified, halal));
     if (minPrice) conditions.push(gte(schema.listings.pricePerHour, String(minPrice)));
     if (maxPrice) conditions.push(lte(schema.listings.pricePerHour, String(maxPrice)));
+
+    // Geo radius filter (Haversine, km). Listings with NULL lat/lng are
+    // excluded automatically because the haversine expression is NULL for
+    // them and NULL fails the <= comparison.
+    const geoActive =
+      typeof lat === "number" && typeof lng === "number" && typeof radius === "number";
+    if (geoActive) {
+      conditions.push(
+        sql`6371 * acos(
+          cos(radians(${lat})) * cos(radians(${schema.listings.latitude}::float))
+          * cos(radians(${schema.listings.longitude}::float) - radians(${lng}))
+          + sin(radians(${lat})) * sin(radians(${schema.listings.latitude}::float))
+        ) <= ${radius}`
+      );
+    }
     if (q) {
       conditions.push(
         or(
