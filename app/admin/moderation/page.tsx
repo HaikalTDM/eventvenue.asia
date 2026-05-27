@@ -1,106 +1,197 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-type FlaggedItem = {
+type FlagType = "review" | "listing" | "message";
+type FlagStatus = "pending" | "resolved";
+
+interface ApiFlag {
   id: string;
-  type: "review" | "listing" | "message";
-  content: string;
-  reportedBy: string;
-  reason: string;
-  target: string;
-  reportedAt: string;
-  status: "pending" | "removed" | "dismissed";
+  type: FlagType;
+  targetId: string;
+  targetTitle: string | null;
+  targetPreview: string;
+  flagReason: string;
+  status: FlagStatus;
+  flaggedBy: { id: string | null; name: string; email: string | null };
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+const typeColors: Record<FlagType, string> = {
+  review: "bg-amber-500/10 text-amber-400",
+  listing: "bg-blue-500/10 text-blue-400",
+  message: "bg-purple-500/10 text-purple-400",
 };
 
-const mockFlagged: FlaggedItem[] = [];
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} hour${hr === 1 ? "" : "s"} ago`;
+  const day = Math.floor(hr / 24);
+  return `${day} day${day === 1 ? "" : "s"} ago`;
+}
 
 export default function AdminModerationPage() {
-  const [items, setItems] = useState(mockFlagged);
-  const [filter, setFilter] = useState<"all" | "pending" | "removed" | "dismissed">("pending");
+  const [items, setItems] = useState<ApiFlag[]>([]);
+  const [filter, setFilter] = useState<"pending" | "resolved" | "all">("pending");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
-  const handleRemove = (id: string) => {
-    setItems((prev) => prev.map((i) => i.id === id ? { ...i, status: "removed" as const } : i));
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ status: filter, limit: "100" });
+      const res = await fetch(`/api/v1/admin/moderation?${params.toString()}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        setError("Could not load flagged content.");
+        return;
+      }
+      const json = await res.json();
+      setItems(json.data as ApiFlag[]);
+    } catch {
+      setError("Network error.");
+    } finally {
+      setLoading(false);
+    }
+  }, [filter]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleAction = async (flagId: string, action: "resolve" | "dismiss") => {
+    setBusyId(flagId);
+    try {
+      const res = await fetch(
+        `/api/v1/admin/moderation?flagId=${flagId}&action=${action}`,
+        { method: "PUT" }
+      );
+      if (!res.ok) {
+        setError(`Could not ${action} flag.`);
+        return;
+      }
+      // Refetch so the row drops out of the active filter view.
+      await load();
+    } finally {
+      setBusyId(null);
+    }
   };
 
-  const handleDismiss = (id: string) => {
-    setItems((prev) => prev.map((i) => i.id === id ? { ...i, status: "dismissed" as const } : i));
-  };
-
-  const filtered = items.filter((i) => filter === "all" ? true : i.status === filter);
-
-  const typeColors = {
-    review: "bg-amber-500/10 text-amber-400",
-    listing: "bg-blue-500/10 text-blue-400",
-    message: "bg-purple-500/10 text-purple-400",
-  };
+  const pendingCount = items.filter((i) => i.status === "pending").length;
 
   return (
     <div>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Content Moderation</h1>
-          <p className="mt-1 text-sm text-gray-400">Review flagged content and take action</p>
+          <p className="mt-1 text-sm text-gray-400">
+            Review flagged content and take action
+          </p>
         </div>
         <span className="rounded-full bg-red-500/10 px-3 py-1 text-sm font-medium text-red-400">
-          {items.filter((i) => i.status === "pending").length} pending review
+          {pendingCount} pending review
         </span>
       </div>
 
-      {/* Filters */}
+      {error && (
+        <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          {error}
+        </div>
+      )}
+
       <div className="mt-6 flex gap-2">
-        {(["pending", "removed", "dismissed", "all"] as const).map((f) => (
-          <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition-all ${filter === f ? "bg-[#EB4D4B] text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}>
+        {(["pending", "resolved", "all"] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition-all ${
+              filter === f
+                ? "bg-[#EB4D4B] text-white"
+                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+            }`}
+          >
             {f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
       </div>
 
-      {/* Flagged Items */}
       <div className="mt-6 space-y-4">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="rounded-2xl border border-gray-700 bg-gray-800 py-12 text-center text-sm text-gray-400">
+            Loading flagged content...
+          </div>
+        ) : items.length === 0 ? (
           <div className="rounded-2xl border border-gray-700 bg-gray-800 py-12 text-center">
             <p className="text-sm text-gray-400">No items match this filter.</p>
           </div>
         ) : (
-          filtered.map((item) => (
-            <div key={item.id} className="rounded-2xl border border-gray-700 bg-gray-800 p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="flex-1">
+          items.map((item) => {
+            const isBusy = busyId === item.id;
+            return (
+              <div
+                key={item.id}
+                className="rounded-2xl border border-gray-700 bg-gray-800 p-5"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${typeColors[item.type]}`}
+                      >
+                        {item.type}
+                      </span>
+                      {item.targetTitle && (
+                        <span className="text-xs text-gray-500">
+                          on {item.targetTitle}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-2 text-sm text-gray-200 line-clamp-2">
+                      &ldquo;{item.targetPreview}&rdquo;
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-gray-400">
+                      <span>Reported by: {item.flaggedBy.name}</span>
+                      <span>Reason: {item.flagReason}</span>
+                      <span>{relativeTime(item.createdAt)}</span>
+                    </div>
+                  </div>
                   <div className="flex items-center gap-2">
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${typeColors[item.type]}`}>
-                      {item.type}
-                    </span>
-                    <span className="text-xs text-gray-500">on {item.target}</span>
+                    {item.status === "pending" ? (
+                      <>
+                        <button
+                          onClick={() => handleAction(item.id, "resolve")}
+                          disabled={isBusy}
+                          className="rounded-lg bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-500 disabled:opacity-50"
+                        >
+                          {isBusy ? "..." : "Remove"}
+                        </button>
+                        <button
+                          onClick={() => handleAction(item.id, "dismiss")}
+                          disabled={isBusy}
+                          className="rounded-lg border border-gray-600 px-3.5 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-700 disabled:opacity-50"
+                        >
+                          Dismiss
+                        </button>
+                      </>
+                    ) : (
+                      <span className="rounded-full bg-gray-600 px-3 py-1 text-xs font-semibold text-gray-300">
+                        Resolved
+                      </span>
+                    )}
                   </div>
-                  <p className="mt-2 text-sm text-gray-200 line-clamp-2">&ldquo;{item.content}&rdquo;</p>
-                  <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-gray-400">
-                    <span>Reported by: {item.reportedBy}</span>
-                    <span>Reason: {item.reason}</span>
-                    <span>{item.reportedAt}</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {item.status === "pending" ? (
-                    <>
-                      <button onClick={() => handleRemove(item.id)} className="rounded-lg bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-500">
-                        Remove
-                      </button>
-                      <button onClick={() => handleDismiss(item.id)} className="rounded-lg border border-gray-600 px-3.5 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-700">
-                        Dismiss
-                      </button>
-                    </>
-                  ) : (
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                      item.status === "removed" ? "bg-red-500/10 text-red-400" : "bg-gray-600 text-gray-300"
-                    }`}>
-                      {item.status === "removed" ? "Removed" : "Dismissed"}
-                    </span>
-                  )}
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
