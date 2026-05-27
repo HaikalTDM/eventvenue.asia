@@ -46,6 +46,22 @@ function mapApiStatus(apiStatus: string): InquiryStatus {
   return mapping[apiStatus] ?? "accept";
 }
 
+/**
+ * Reverse of mapApiStatus: turns the UI status (the labels customers
+ * see on the buttons) into the schema enum the PUT endpoint expects.
+ */
+function uiStatusToApi(uiStatus: InquiryStatus): string {
+  const mapping: Record<InquiryStatus, string> = {
+    accept: "accepted",
+    approve: "approved",
+    proceed: "in_progress",
+    ongoing: "ongoing",
+    completed: "completed",
+    cancelled: "cancelled",
+  };
+  return mapping[uiStatus];
+}
+
 function mapApiToInquiryStatus(status: string): InquiryStatus {
   return mapApiStatus(status);
 }
@@ -65,6 +81,8 @@ export default function VendorInquiriesPage() {
   const [error, setError] = useState<string | null>(null);
   const [statuses, setStatuses] = useState<Record<string, InquiryStatus>>({});
   const [filter, setFilter] = useState<FilterType>("all");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -100,8 +118,40 @@ export default function VendorInquiriesPage() {
       year: "numeric",
     });
 
-  const advanceStatus = (id: string, newStatus: InquiryStatus) => {
+  const advanceStatus = async (id: string, newStatus: InquiryStatus) => {
+    setBusyId(id);
+    setActionError(null);
+    // Optimistic update so the UI reacts instantly.
+    const previous = statuses[id];
     setStatuses((prev) => ({ ...prev, [id]: newStatus }));
+    try {
+      const res = await fetch(`/api/v1/inquiries/${id}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: uiStatusToApi(newStatus) }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        // Revert on failure.
+        setStatuses((prev) => {
+          const next = { ...prev };
+          if (previous === undefined) delete next[id];
+          else next[id] = previous;
+          return next;
+        });
+        setActionError(err?.error?.message || "Could not update inquiry status.");
+      }
+    } catch {
+      setStatuses((prev) => {
+        const next = { ...prev };
+        if (previous === undefined) delete next[id];
+        else next[id] = previous;
+        return next;
+      });
+      setActionError("Network error while updating status.");
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const countByStatus = (s: InquiryStatus) =>
@@ -145,6 +195,12 @@ export default function VendorInquiriesPage() {
           </button>
         ))}
       </div>
+
+      {actionError && (
+        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {actionError}
+        </div>
+      )}
 
       {loading ? (
         <div className="mt-12 flex items-center justify-center py-16">
@@ -228,13 +284,14 @@ export default function VendorInquiriesPage() {
                       <button
                         key={ns}
                         onClick={() => advanceStatus(inq.id, ns)}
-                        className={`rounded-xl px-4 py-2 text-sm font-semibold transition-all ${
+                        disabled={busyId === inq.id}
+                        className={`rounded-xl px-4 py-2 text-sm font-semibold transition-all disabled:opacity-50 ${
                           ns === "cancelled"
                             ? "border border-red-200 text-red-600 hover:bg-red-50"
                             : "bg-[#EB4D4B] text-white hover:bg-[#dc2626]"
                         }`}
                       >
-                        {statusLabels[ns].label}
+                        {busyId === inq.id ? "..." : statusLabels[ns].label}
                       </button>
                     ))}
                   </div>
