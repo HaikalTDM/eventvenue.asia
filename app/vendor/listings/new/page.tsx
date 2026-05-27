@@ -133,10 +133,11 @@ export default function AddVenuePage() {
     e.preventDefault();
     setSubmitError(null);
 
-    // Validate cascade location: at least state + city are required so
-    // search filters can find this listing.
-    if (!locationSelection.state || !locationSelection.city) {
-      setSubmitError("Please pick a state and city for the venue.");
+    // Validate cascade location: state is required so search filters can
+    // find this listing. City and district are optional (the cascade UI
+    // only shows the state dropdown by default).
+    if (!locationSelection.state) {
+      setSubmitError("Please pick a state for the venue.");
       return;
     }
 
@@ -146,7 +147,10 @@ export default function AddVenuePage() {
       locationSelection.district,
       locationSelection.city,
     ].filter(Boolean) as string[];
-    const locationStr = locationParts.join(", ") + ", Malaysia";
+    const locationStr =
+      locationParts.length > 0
+        ? locationParts.join(", ") + ", Malaysia"
+        : "Malaysia";
 
     const lat = latitude.trim() === "" ? undefined : parseFloat(latitude);
     const lng = longitude.trim() === "" ? undefined : parseFloat(longitude);
