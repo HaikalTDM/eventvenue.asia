@@ -11,7 +11,7 @@ export default function VendorListingsPage() {
   const [listings, setListings] = useState<ApiListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [vendorType, setVendorType] = useState<"venue" | "service" | null>(null);
+  const [vendorType, setVendorType] = useState<"venue_owner" | "service_provider" | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -21,12 +21,17 @@ export default function VendorListingsPage() {
         const profile = (await getVendorProfile()) as {
           data?: { listingType?: string; vendorType?: string };
         };
-        const type =
-          profile?.data?.listingType || profile?.data?.vendorType || "venue";
-        const normalizedType = type === "service" ? "service" : "venue";
+        const raw =
+          profile?.data?.vendorType || profile?.data?.listingType || "venue_owner";
+        const normalizedType: "venue_owner" | "service_provider" =
+          raw === "service" || raw === "service_provider"
+            ? "service_provider"
+            : "venue_owner";
         setVendorType(normalizedType);
+        // The /listings API expects the legacy short form; map the schema
+        // enum back when querying.
         const result = await getListings({
-          listingType: normalizedType,
+          listingType: normalizedType === "venue_owner" ? "venue" : "service",
         });
         setListings(result.data);
       } catch (err) {
@@ -46,7 +51,7 @@ export default function VendorListingsPage() {
     );
   };
 
-  const isVenue = vendorType === "venue";
+  const isVenue = vendorType === "venue_owner";
   const displayType = isVenue ? "Venue" : "Service";
 
   return (

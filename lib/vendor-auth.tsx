@@ -45,6 +45,12 @@ export function VendorAuthProvider({ children }: { children: ReactNode }) {
       if (stored) {
         try {
           const v = JSON.parse(stored);
+          // Mock data uses legacy "venue" / "service" labels; coerce to the
+          // schema enum that the rest of the app now expects everywhere.
+          const normalisedType =
+            v.vendorType === "service" || v.vendorType === "service_provider"
+              ? "service_provider"
+              : "venue_owner";
           setVendor({
             id: v.id || "mock-vendor",
             name: v.name,
@@ -54,7 +60,7 @@ export function VendorAuthProvider({ children }: { children: ReactNode }) {
             avatarUrl: v.avatarUrl,
             isVerified: v.isVerified ?? true,
             vendorId: v.id,
-            vendorType: v.vendorType || "venue",
+            vendorType: normalisedType,
             vendorName: v.businessName,
             createdAt: v.joinedAt || "2025-01-01",
           });

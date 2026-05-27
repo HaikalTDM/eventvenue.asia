@@ -193,7 +193,7 @@ export default function VendorSettingsPage() {
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-gray-700">Vendor Type</label>
                 <div className="flex h-[46px] items-center rounded-xl border border-gray-200 bg-gray-100 px-4 text-sm text-gray-500">
-                  {vendor.vendorType === "venue" ? "Venue Owner" : "Service Provider"}
+                  {vendor.vendorType === "venue" || vendor.vendorType === "venue_owner" ? "Venue Owner" : "Service Provider"}
                 </div>
               </div>
             </div>
