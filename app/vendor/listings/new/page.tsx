@@ -606,31 +606,38 @@ export default function AddVenuePage() {
         </section>
 
         {/* Submit */}
-        <div className="flex items-center justify-between rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <p className="text-sm text-gray-500">
-            Your listing will be reviewed before going live.
-          </p>
-          <div className="flex gap-3">
-            <Link
-              href="/vendor/listings"
-              className="rounded-xl border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              Cancel
-            </Link>
-            <button
-              type="submit"
-              disabled={loading}
-              className="inline-flex items-center gap-2 rounded-xl bg-[#EB4D4B] px-6 py-2.5 text-sm font-bold text-white shadow-md shadow-[#EB4D4B]/25 transition-all hover:bg-[#dc2626] disabled:opacity-60"
-            >
-              {loading ? (
-                <>
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Submitting...
-                </>
-              ) : (
-                "Submit Venue"
-              )}
-            </button>
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+          {submitError && (
+            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {submitError}
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-500">
+              Your listing will be reviewed before going live.
+            </p>
+            <div className="flex gap-3">
+              <Link
+                href="/vendor/listings"
+                className="rounded-xl border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </Link>
+              <button
+                type="submit"
+                disabled={loading}
+                className="inline-flex items-center gap-2 rounded-xl bg-[#EB4D4B] px-6 py-2.5 text-sm font-bold text-white shadow-md shadow-[#EB4D4B]/25 transition-all hover:bg-[#dc2626] disabled:opacity-60"
+              >
+                {loading ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Submitting...
+                  </>
+                ) : (
+                  "Submit Venue"
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </form>
