@@ -1,145 +1,297 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type DocStatus = "pending" | "approved" | "rejected";
 
-type Document = {
+interface ApiDocument {
   id: string;
-  vendorName: string;
-  businessName: string;
-  docType: string;
-  fileName: string;
-  uploadedAt: string;
+  docType: "business_license" | "halal_cert" | "identity" | "other";
+  fileUrl: string;
   status: DocStatus;
-  notes?: string;
+  rejectReason: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+  vendor: {
+    id: string;
+    businessName: string;
+    ownerName: string | null;
+    ownerEmail: string | null;
+  } | null;
+}
+
+const docTypeLabels: Record<ApiDocument["docType"], string> = {
+  business_license: "SSM Business Registration",
+  halal_cert: "Halal Certificate (JAKIM)",
+  identity: "Identity Document",
+  other: "Other",
 };
 
-const mockDocuments: Document[] = [];
+const docTypeColors: Record<ApiDocument["docType"], string> = {
+  business_license: "bg-blue-500/10 text-blue-400",
+  halal_cert: "bg-green-500/10 text-green-400",
+  identity: "bg-purple-500/10 text-purple-400",
+  other: "bg-gray-500/10 text-gray-300",
+};
+
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} hour${hr === 1 ? "" : "s"} ago`;
+  const day = Math.floor(hr / 24);
+  return `${day} day${day === 1 ? "" : "s"} ago`;
+}
 
 export default function AdminDocumentsPage() {
-  const [documents, setDocuments] = useState(mockDocuments);
-  const [filter, setFilter] = useState<"all" | "pending" | "approved" | "rejected">("pending");
+  const [documents, setDocuments] = useState<ApiDocument[]>([]);
+  const [filter, setFilter] = useState<"pending" | "approved" | "rejected" | "all">("pending");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
-  const handleApprove = (id: string) => {
-    setDocuments((prev) => prev.map((d) => d.id === id ? { ...d, status: "approved" as DocStatus, notes: "Verified" } : d));
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ status: filter, limit: "100" });
+      const res = await fetch(`/api/v1/admin/documents?${params.toString()}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        setError("Could not load documents.");
+        return;
+      }
+      const json = await res.json();
+      setDocuments(json.data as ApiDocument[]);
+    } catch {
+      setError("Network error.");
+    } finally {
+      setLoading(false);
+    }
+  }, [filter]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleApprove = async (id: string) => {
+    setBusyId(id);
+    try {
+      const res = await fetch(
+        `/api/v1/admin/documents?docId=${id}&action=approve`,
+        { method: "PUT" }
+      );
+      if (!res.ok) {
+        setError("Could not approve document.");
+        return;
+      }
+      await load();
+    } finally {
+      setBusyId(null);
+    }
   };
 
-  const handleReject = (id: string) => {
-    setDocuments((prev) => prev.map((d) => d.id === id ? { ...d, status: "rejected" as DocStatus, notes: rejectReason || "Document rejected" } : d));
-    setRejectingId(null);
-    setRejectReason("");
+  const handleReject = async (id: string) => {
+    setBusyId(id);
+    try {
+      const res = await fetch(
+        `/api/v1/admin/documents?docId=${id}&action=reject`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason: rejectReason || "Document rejected" }),
+        }
+      );
+      if (!res.ok) {
+        setError("Could not reject document.");
+        return;
+      }
+      setRejectingId(null);
+      setRejectReason("");
+      await load();
+    } finally {
+      setBusyId(null);
+    }
   };
 
-  const filtered = documents.filter((d) => filter === "all" ? true : d.status === filter);
-
-  const docTypeIcons: Record<string, string> = {
-    "Halal Certificate (JAKIM)": "bg-green-500/10 text-green-400",
-    "SSM Business Registration": "bg-blue-500/10 text-blue-400",
-    "Premises License": "bg-purple-500/10 text-purple-400",
-    "Food Handler License": "bg-amber-500/10 text-amber-400",
-  };
+  const pendingCount = documents.filter((d) => d.status === "pending").length;
 
   return (
     <div>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Document Verification</h1>
-          <p className="mt-1 text-sm text-gray-400">Review and verify vendor documents</p>
+          <p className="mt-1 text-sm text-gray-400">
+            Review and verify vendor documents
+          </p>
         </div>
         <span className="rounded-full bg-amber-500/10 px-3 py-1 text-sm font-medium text-amber-400">
-          {documents.filter((d) => d.status === "pending").length} pending
+          {pendingCount} pending
         </span>
       </div>
 
-      {/* Filters */}
+      {error && (
+        <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          {error}
+        </div>
+      )}
+
       <div className="mt-6 flex gap-2">
         {(["pending", "approved", "rejected", "all"] as const).map((f) => (
-          <button key={f} onClick={() => setFilter(f)} className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition-all ${filter === f ? "bg-[#EB4D4B] text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}>
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`rounded-lg px-3.5 py-1.5 text-sm font-medium transition-all ${
+              filter === f
+                ? "bg-[#EB4D4B] text-white"
+                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+            }`}
+          >
             {f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
       </div>
 
-      {/* Documents List */}
       <div className="mt-6 space-y-3">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="rounded-2xl border border-gray-700 bg-gray-800 py-12 text-center text-sm text-gray-400">
+            Loading documents...
+          </div>
+        ) : documents.length === 0 ? (
           <div className="rounded-2xl border border-gray-700 bg-gray-800 py-12 text-center">
-            <p className="text-sm text-gray-400">No documents match this filter.</p>
+            <p className="text-sm text-gray-400">
+              No documents match this filter.
+            </p>
           </div>
         ) : (
-          filtered.map((doc) => (
-            <div key={doc.id} className="rounded-2xl border border-gray-700 bg-gray-800 p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="flex items-start gap-4">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gray-700">
-                    <svg className="h-5 w-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${docTypeIcons[doc.docType] ?? "bg-gray-600 text-gray-300"}`}>
-                        {doc.docType}
-                      </span>
+          documents.map((doc) => {
+            const isBusy = busyId === doc.id;
+            return (
+              <div
+                key={doc.id}
+                className="rounded-2xl border border-gray-700 bg-gray-800 p-5"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gray-700">
+                      <svg
+                        className="h-5 w-5 text-gray-300"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.5}
+                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                        />
+                      </svg>
                     </div>
-                    <p className="mt-1.5 text-sm font-medium text-white">{doc.businessName}</p>
-                    <p className="mt-0.5 text-xs text-gray-400">{doc.vendorName} · Uploaded {doc.uploadedAt}</p>
-                    <p className="mt-1 text-xs text-gray-500">File: {doc.fileName}</p>
-                    {doc.notes && (
-                      <p className="mt-1 text-xs text-gray-400 italic">{doc.notes}</p>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${docTypeColors[doc.docType]}`}
+                        >
+                          {docTypeLabels[doc.docType]}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-sm font-medium text-white">
+                        {doc.vendor?.businessName ?? "Unknown vendor"}
+                      </p>
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        {doc.vendor?.ownerName ?? "Owner"} ·{" "}
+                        Uploaded {relativeTime(doc.createdAt)}
+                      </p>
+                      {doc.rejectReason && (
+                        <p className="mt-1 text-xs italic text-red-300">
+                          Reason: {doc.rejectReason}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {doc.status === "pending" ? (
+                      <>
+                        <button
+                          onClick={() => handleApprove(doc.id)}
+                          disabled={isBusy}
+                          className="rounded-lg bg-green-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-green-500 disabled:opacity-50"
+                        >
+                          {isBusy ? "..." : "Approve"}
+                        </button>
+                        <button
+                          onClick={() => setRejectingId(doc.id)}
+                          disabled={isBusy}
+                          className="rounded-lg bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-500 disabled:opacity-50"
+                        >
+                          Reject
+                        </button>
+                        <a
+                          href={doc.fileUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded-lg border border-gray-600 px-3.5 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-700"
+                        >
+                          View
+                        </a>
+                      </>
+                    ) : (
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          doc.status === "approved"
+                            ? "bg-green-500/10 text-green-400"
+                            : "bg-red-500/10 text-red-400"
+                        }`}
+                      >
+                        {doc.status === "approved" ? "Approved" : "Rejected"}
+                      </span>
                     )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {doc.status === "pending" ? (
-                    <>
-                      <button onClick={() => handleApprove(doc.id)} className="rounded-lg bg-green-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-green-500">
-                        Approve
+                {rejectingId === doc.id && (
+                  <div className="mt-4 border-t border-gray-700 pt-4">
+                    <label className="block text-xs font-medium text-gray-300">
+                      Reason for rejection
+                    </label>
+                    <textarea
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      placeholder="e.g. Document expired, image unclear, wrong document type..."
+                      rows={2}
+                      className="mt-1.5 w-full resize-none rounded-xl border border-gray-600 bg-gray-700 px-4 py-2.5 text-sm text-white placeholder-gray-400 outline-none focus:border-[#EB4D4B] focus:ring-2 focus:ring-[#EB4D4B]/20"
+                    />
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        onClick={() => handleReject(doc.id)}
+                        disabled={isBusy}
+                        className="rounded-lg bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-500 disabled:opacity-50"
+                      >
+                        {isBusy ? "..." : "Confirm Reject"}
                       </button>
-                      <button onClick={() => setRejectingId(doc.id)} className="rounded-lg bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-500">
-                        Reject
+                      <button
+                        onClick={() => {
+                          setRejectingId(null);
+                          setRejectReason("");
+                        }}
+                        className="rounded-lg border border-gray-600 px-3.5 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-700"
+                      >
+                        Cancel
                       </button>
-                      <button className="rounded-lg border border-gray-600 px-3.5 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-700">
-                        View
-                      </button>
-                    </>
-                  ) : (
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                      doc.status === "approved" ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"
-                    }`}>
-                      {doc.status === "approved" ? "Approved" : "Rejected"}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Reject Form */}
-              {rejectingId === doc.id && (
-                <div className="mt-4 border-t border-gray-700 pt-4">
-                  <label className="block text-xs font-medium text-gray-300">Reason for rejection</label>
-                  <textarea
-                    value={rejectReason}
-                    onChange={(e) => setRejectReason(e.target.value)}
-                    placeholder="e.g. Document expired, image unclear, wrong document type..."
-                    rows={2}
-                    className="mt-1.5 w-full resize-none rounded-xl border border-gray-600 bg-gray-700 px-4 py-2.5 text-sm text-white placeholder-gray-400 outline-none focus:border-[#EB4D4B] focus:ring-2 focus:ring-[#EB4D4B]/20"
-                  />
-                  <div className="mt-2 flex gap-2">
-                    <button onClick={() => handleReject(doc.id)} className="rounded-lg bg-red-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-red-500">
-                      Confirm Reject
-                    </button>
-                    <button onClick={() => { setRejectingId(null); setRejectReason(""); }} className="rounded-lg border border-gray-600 px-3.5 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-700">
-                      Cancel
-                    </button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          ))
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </div>
