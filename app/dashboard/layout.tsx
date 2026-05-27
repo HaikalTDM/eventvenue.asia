@@ -1,18 +1,10 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import StickyNav from "@/components/StickyNav";
 import Footer from "@/components/Footer";
-
-function hasUserSession(): boolean {
-  try {
-    return localStorage.getItem("ev_mock_user") !== null;
-  } catch {
-    return false;
-  }
-}
 
 export default function DashboardLayout({
   children,
@@ -21,21 +13,17 @@ export default function DashboardLayout({
 }) {
   const { user, isLoading } = useAuth();
   const router = useRouter();
-  const hasSession = useRef(hasUserSession());
 
-  useLayoutEffect(() => {
-    if (!hasSession.current) {
-      router.replace("/sign-in");
-    }
-  }, [router]);
-
+  // Redirect only after session loading completes. Do NOT short-circuit on
+  // a legacy localStorage flag - live-mode customers don't write that
+  // flag and were being bounced to /sign-in even with a valid JWT.
   useEffect(() => {
     if (!isLoading && !user) {
       router.replace("/sign-in");
     }
   }, [user, isLoading, router]);
 
-  if (!hasSession.current || isLoading || !user) {
+  if (isLoading || !user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-[#EB4D4B]" />
