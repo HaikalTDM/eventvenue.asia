@@ -165,14 +165,17 @@ export default function AddVenuePage() {
 
     setLoading(true);
     try {
+      // Zod's .optional() means string|undefined, not string|null. The
+      // cascade stores nulls when nothing is picked, so coerce them to
+      // undefined here. State is guaranteed non-null by the guard above.
       const body: Record<string, unknown> = {
         listingType: "venue",
         title,
         description: description || undefined,
         location: locationStr,
-        state: locationSelection.state,
-        city: locationSelection.city,
-        district: locationSelection.district || undefined,
+        state: locationSelection.state ?? undefined,
+        city: locationSelection.city ?? undefined,
+        district: locationSelection.district ?? undefined,
         address: address || undefined,
         capacity: capacity ? Number(capacity) : undefined,
         pricePerHour: pricePerHour ? Number(pricePerHour) : undefined,
