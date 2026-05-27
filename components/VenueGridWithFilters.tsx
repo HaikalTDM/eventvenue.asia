@@ -276,17 +276,17 @@ export default function VenueGridWithFilters({
         </div>
 
         <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
-          <div className="flex w-full shrink-0 flex-col gap-4 lg:w-72">
-            <div className="rounded-2xl border border-gray-200 bg-white p-4">
-              <h3 className="text-sm font-semibold text-gray-900">Region</h3>
+          <div className="flex w-full shrink-0 flex-col gap-4 lg:w-72 xl:w-80">
+            <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+              <h3 className="text-lg font-bold text-gray-900">Region</h3>
               <p className="mt-1 text-xs text-gray-500">
-                Drill down by state, city, then district.
+                Filter by Malaysian state.
               </p>
-              <div className="mt-3">
+              <div className="mt-4">
                 <LocationCascade
                   value={locationSelection}
                   onChange={setLocationSelection}
-                  className="grid-cols-1"
+                  onlyState
                 />
               </div>
             </div>

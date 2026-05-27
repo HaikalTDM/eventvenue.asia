@@ -308,15 +308,15 @@ export default function AddVenuePage() {
 
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                Region <span className="text-red-400">*</span>
+                State <span className="text-red-400">*</span>
               </label>
               <p className="mb-2 text-xs text-gray-400">
-                Pick the state, city, and (optionally) district. This is what
-                customers use to filter venues.
+                Pick the Malaysian state. This is what customers use to filter venues.
               </p>
               <LocationCascade
                 value={locationSelection}
                 onChange={setLocationSelection}
+                onlyState
               />
             </div>
 

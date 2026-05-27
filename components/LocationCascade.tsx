@@ -20,6 +20,13 @@ interface LocationCascadeProps {
   value: LocationSelection;
   onChange: (next: LocationSelection) => void;
   className?: string;
+  /**
+   * When true, only the State dropdown renders. City and District are
+   * preserved in the value (cleared when state changes) but the user
+   * cannot pick them through this component. Used by the search sidebar
+   * and the vendor listing form when a flatter UI is preferred.
+   */
+  onlyState?: boolean;
 }
 
 /**
@@ -36,9 +43,26 @@ export default function LocationCascade({
   value,
   onChange,
   className,
+  onlyState = false,
 }: LocationCascadeProps) {
   const cities = value.state ? getCities(value.state) : [];
   const districts = value.state && value.city ? getDistricts(value.state, value.city) : [];
+
+  if (onlyState) {
+    return (
+      <div className={className}>
+        <Dropdown
+          label="State"
+          placeholder="Any state"
+          options={malaysiaLocations.map((s) => ({ key: s.key, label: s.name }))}
+          selectedKey={value.state}
+          onSelect={(stateKey) =>
+            onChange({ state: stateKey, city: null, district: null })
+          }
+        />
+      </div>
+    );
+  }
 
   return (
     <div className={`grid grid-cols-1 gap-2 sm:grid-cols-3 ${className ?? ""}`}>
