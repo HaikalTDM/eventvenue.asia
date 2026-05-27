@@ -28,9 +28,11 @@ export default function VendorListingsPage() {
             ? "service_provider"
             : "venue_owner";
         setVendorType(normalizedType);
-        // The /listings API expects the legacy short form; map the schema
-        // enum back when querying.
+        // Use ?mine=true so we get this vendor's listings regardless of
+        // status (draft, paused, active). The public listings filter
+        // status=active which would hide brand-new draft listings.
         const result = await getListings({
+          mine: "true",
           listingType: normalizedType === "venue_owner" ? "venue" : "service",
         });
         setListings(result.data);

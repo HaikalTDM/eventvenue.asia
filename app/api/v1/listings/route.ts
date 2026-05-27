@@ -27,10 +27,37 @@ export async function GET(request: NextRequest) {
       sort, page, limit,
     } = parsed.data;
 
-    const conditions: SQL[] = [
-      eq(schema.listings.status, "active"),
-      eq(schema.listings.isMock, false),
-    ];
+    // "mine=true" returns the authenticated vendor's own listings,
+    // including drafts and paused. Used by /vendor/listings so vendors
+    // can see and manage listings that aren't yet visible to the public
+    // search.
+    const mineMode = url.searchParams.get("mine") === "true";
+
+    let conditions: SQL[];
+    if (mineMode) {
+      if (!user || user.role !== "vendor") {
+        return NextResponse.json(
+          { error: { code: "FORBIDDEN", message: "Vendor authentication required for mine=true" } },
+          { status: 403 }
+        );
+      }
+      const vendorProfile = await db.query.vendorProfiles.findFirst({
+        where: (vp, { eq: e }) => e(vp.userId, user.sub),
+      });
+      if (!vendorProfile) {
+        return NextResponse.json({
+          data: [],
+          pagination: paginate(page, limit, 0),
+          filters: { amenities: [], eventTypes: [] },
+        });
+      }
+      conditions = [eq(schema.listings.vendorId, vendorProfile.id)];
+    } else {
+      conditions = [
+        eq(schema.listings.status, "active"),
+        eq(schema.listings.isMock, false),
+      ];
+    }
 
     if (type) conditions.push(eq(schema.listings.listingType, type));
     if (location) conditions.push(ilike(schema.listings.location, `%${location}%`));
