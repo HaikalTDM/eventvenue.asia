@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { FilterState, FilterOption } from "@/lib/types";
 
 interface SidebarFilterProps {
@@ -121,13 +122,34 @@ function FilterGroup({
   selected: string[];
   onToggle: (key: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const INITIAL_VISIBLE = 3;
+
+  // Selected options always render first so a 4th selection never
+  // disappears when the group collapses. Order within each bucket is
+  // preserved from the parent's options array.
+  const selectedOptions = options.filter((o) => selected.includes(o.key));
+  const unselectedOptions = options.filter((o) => !selected.includes(o.key));
+  const ordered = [...selectedOptions, ...unselectedOptions];
+
+  const visible = expanded ? ordered : ordered.slice(0, INITIAL_VISIBLE);
+  const hiddenCount = ordered.length - visible.length;
+  const selectedCount = selected.length;
+
   return (
     <div className="mb-6">
-      <h4 className="mb-3 text-sm font-bold uppercase tracking-wider text-gray-500">
-        {title}
-      </h4>
+      <div className="mb-3 flex items-center justify-between">
+        <h4 className="text-sm font-bold uppercase tracking-wider text-gray-500">
+          {title}
+        </h4>
+        {selectedCount > 0 && (
+          <span className="rounded-full bg-[#EB4D4B]/10 px-2 py-0.5 text-xs font-semibold text-[#EB4D4B]">
+            {selectedCount}
+          </span>
+        )}
+      </div>
       <ul className="space-y-2.5">
-        {options.map((option) => (
+        {visible.map((option) => (
           <li key={option.key}>
             <label className="inline-flex cursor-pointer items-center gap-3">
               <div
@@ -165,6 +187,23 @@ function FilterGroup({
           </li>
         ))}
       </ul>
+      {ordered.length > INITIAL_VISIBLE && (
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-[#EB4D4B] hover:underline"
+        >
+          {expanded ? "Show less" : `Show all (${hiddenCount} more)`}
+          <svg
+            className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
