@@ -303,11 +303,25 @@ export default function VenueDetailPage() {
         <section className="container-custom pb-16">
           <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
             <div className="min-w-0 flex-1">
-              <LocationMap
-                coordinates={venue.coordinates}
-                address={venue.address}
-                venueTitle={venue.title}
-              />
+              {venue.coordinates.lat !== 0 || venue.coordinates.lng !== 0 ? (
+                <LocationMap
+                  coordinates={venue.coordinates}
+                  address={venue.address}
+                  venueTitle={venue.title}
+                />
+              ) : (
+                <section>
+                  <h2 className="text-xl font-bold text-gray-900">Location</h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    {venue.address || "Address not provided"}
+                  </p>
+                  <div className="mt-4 rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-8 text-center">
+                    <p className="text-sm text-gray-500">
+                      The vendor hasn&apos;t pinned this venue on a map yet.
+                    </p>
+                  </div>
+                </section>
+              )}
             </div>
             <div className="min-w-0 flex-1">
               <AvailabilityCalendar blockedDates={venue.blockedDates} />
