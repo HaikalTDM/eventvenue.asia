@@ -94,25 +94,11 @@ export default function VenueDetailPage() {
     }
 
     try {
-      const searchResponse: ApiListingsResponse = await getListings({
-        q: slug,
-        type: "venue",
-        limit: "5",
-      });
-
-      const matchedListing = searchResponse.data.find(
-        (item) => item.slug === slug
-      );
-
-      if (!matchedListing) {
-        setNotFoundResult(true);
-        setLoading(false);
-        return;
-      }
-
-      const detailResponse: ApiDetailResponse = await getListingDetail(
-        matchedListing.id
-      );
+      // Detail endpoint accepts either UUID or slug; pass the route param
+      // straight through. Avoids the previous indirect search-by-q which
+      // missed listings whose slug didn't appear in title/description/
+      // location.
+      const detailResponse: ApiDetailResponse = await getListingDetail(slug);
 
       const mappedVenue = mapDetailToVenue(detailResponse.data);
       setVenue(mappedVenue);

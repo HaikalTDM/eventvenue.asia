@@ -13,8 +13,15 @@ export async function GET(
     const { id } = await params;
     const { user } = await authenticate(request);
 
+    // Accept either a UUID or a slug. The route param is named "id" for
+    // historical reasons, but the public venue page navigates by slug.
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
     const listing = await db.query.listings.findFirst({
-      where: (l, { eq: e, and: a }) => a(e(l.id, id), e(l.isMock, false)),
+      where: (l, { eq: e, and: a, or: o }) =>
+        a(
+          isUuid ? o(e(l.id, id), e(l.slug, id))! : e(l.slug, id),
+          e(l.isMock, false)
+        ),
     });
 
     if (!listing) {
