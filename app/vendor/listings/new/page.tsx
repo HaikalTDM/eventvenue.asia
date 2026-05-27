@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import VendorPortalLayout from "@/components/VendorPortalLayout";
+import LocationCascade, { type LocationSelection } from "@/components/LocationCascade";
 
 const eventTypeOptions = [
   "Wedding", "Corporate", "Private Party", "Birthday", "Seminar",
@@ -27,15 +28,28 @@ export default function AddVenuePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Basic Info
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [address, setAddress] = useState("");
-  const [location, setLocation] = useState("");
   const [capacity, setCapacity] = useState("");
   const [pricePerHour, setPricePerHour] = useState("");
   const [currency, setCurrency] = useState("MYR");
+
+  // Hierarchical location (state -> city -> district)
+  const [locationSelection, setLocationSelection] = useState<LocationSelection>({
+    state: null,
+    city: null,
+    district: null,
+  });
+
+  // Coordinates (optional, used by the "near me" geo search filter)
+  const [latitude, setLatitude] = useState("");
+  const [longitude, setLongitude] = useState("");
+  const [geoBusy, setGeoBusy] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
 
   // Event Types & Amenities
   const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>([]);
@@ -86,13 +100,105 @@ export default function AddVenuePage() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleUseCurrentLocation = () => {
+    setGeoError(null);
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setGeoError("Geolocation is not supported by this browser.");
+      return;
+    }
+    setGeoBusy(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLatitude(pos.coords.latitude.toFixed(6));
+        setLongitude(pos.coords.longitude.toFixed(6));
+        setGeoBusy(false);
+      },
+      (err) => {
+        setGeoBusy(false);
+        if (err.code === err.PERMISSION_DENIED) {
+          setGeoError("Location permission denied. Enter coordinates manually.");
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          setGeoError("Location unavailable.");
+        } else if (err.code === err.TIMEOUT) {
+          setGeoError("Location request timed out.");
+        } else {
+          setGeoError("Could not get your location.");
+        }
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
+    );
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
+
+    // Validate cascade location: at least state + city are required so
+    // search filters can find this listing.
+    if (!locationSelection.state || !locationSelection.city) {
+      setSubmitError("Please pick a state and city for the venue.");
+      return;
+    }
+
+    // Build a free-text location string for backwards compatibility with
+    // existing UI that displays listing.location.
+    const locationParts = [
+      locationSelection.district,
+      locationSelection.city,
+    ].filter(Boolean) as string[];
+    const locationStr = locationParts.join(", ") + ", Malaysia";
+
+    const lat = latitude.trim() === "" ? undefined : parseFloat(latitude);
+    const lng = longitude.trim() === "" ? undefined : parseFloat(longitude);
+    if (lat !== undefined && (!Number.isFinite(lat) || lat < -90 || lat > 90)) {
+      setSubmitError("Latitude must be between -90 and 90.");
+      return;
+    }
+    if (lng !== undefined && (!Number.isFinite(lng) || lng < -180 || lng > 180)) {
+      setSubmitError("Longitude must be between -180 and 180.");
+      return;
+    }
+
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const body: Record<string, unknown> = {
+        listingType: "venue",
+        title,
+        description: description || undefined,
+        location: locationStr,
+        state: locationSelection.state,
+        city: locationSelection.city,
+        district: locationSelection.district || undefined,
+        address: address || undefined,
+        capacity: capacity ? Number(capacity) : undefined,
+        pricePerHour: pricePerHour ? Number(pricePerHour) : undefined,
+        currency,
+        halalCertified: halalVerified,
+        amenities: selectedAmenities,
+        eventTypes: selectedEventTypes,
+      };
+      if (lat !== undefined) body.latitude = lat;
+      if (lng !== undefined) body.longitude = lng;
+
+      const res = await fetch("/api/v1/listings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        const detail = err?.error?.details?.[0]?.message;
+        setSubmitError(detail || err?.error?.message || "Could not create listing.");
+        return;
+      }
       setSuccess(true);
-    }, 1500);
+      // Photos are not yet uploaded - need R2 wiring (Phase C). Contact info
+      // is also not part of the listing schema; treat as cosmetic for now.
+    } catch {
+      setSubmitError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (success) {
@@ -121,7 +227,9 @@ export default function AddVenuePage() {
                 setTitle("");
                 setDescription("");
                 setAddress("");
-                setLocation("");
+                setLocationSelection({ state: null, city: null, district: null });
+                setLatitude("");
+                setLongitude("");
                 setCapacity("");
                 setPricePerHour("");
                 setSelectedEventTypes([]);
@@ -198,35 +306,81 @@ export default function AddVenuePage() {
               <p className="mt-1 text-xs text-gray-400">{description.length}/500 characters</p>
             </div>
 
-            <div className="grid gap-5 sm:grid-cols-2">
-              <div>
-                <label htmlFor="location" className="mb-1.5 block text-sm font-medium text-gray-700">
-                  City / Area <span className="text-red-400">*</span>
-                </label>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                Region <span className="text-red-400">*</span>
+              </label>
+              <p className="mb-2 text-xs text-gray-400">
+                Pick the state, city, and (optionally) district. This is what
+                customers use to filter venues.
+              </p>
+              <LocationCascade
+                value={locationSelection}
+                onChange={setLocationSelection}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="address" className="mb-1.5 block text-sm font-medium text-gray-700">
+                Full Address <span className="text-red-400">*</span>
+              </label>
+              <input
+                id="address"
+                type="text"
+                required
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="e.g. 5 Jalan Sultan Hishamuddin, 50000 KL"
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:border-[#EB4D4B] focus:ring-2 focus:ring-[#EB4D4B]/20"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                Coordinates <span className="text-gray-400">(optional)</span>
+              </label>
+              <p className="mb-2 text-xs text-gray-400">
+                Set lat/lng so customers using &quot;near me&quot; search find your venue.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
                 <input
-                  id="location"
                   type="text"
-                  required
-                  value={location}
-                  onChange={(e) => setLocation(e.target.value)}
-                  placeholder="e.g. Kuala Lumpur, Malaysia"
+                  inputMode="decimal"
+                  value={latitude}
+                  onChange={(e) => setLatitude(e.target.value)}
+                  placeholder="Latitude e.g. 3.1390"
                   className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:border-[#EB4D4B] focus:ring-2 focus:ring-[#EB4D4B]/20"
                 />
-              </div>
-              <div>
-                <label htmlFor="address" className="mb-1.5 block text-sm font-medium text-gray-700">
-                  Full Address <span className="text-red-400">*</span>
-                </label>
                 <input
-                  id="address"
                   type="text"
-                  required
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  placeholder="e.g. 5 Jalan Sultan Hishamuddin, 50000 KL"
+                  inputMode="decimal"
+                  value={longitude}
+                  onChange={(e) => setLongitude(e.target.value)}
+                  placeholder="Longitude e.g. 101.6869"
                   className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:border-[#EB4D4B] focus:ring-2 focus:ring-[#EB4D4B]/20"
                 />
+                <button
+                  type="button"
+                  onClick={handleUseCurrentLocation}
+                  disabled={geoBusy}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 px-4 py-3 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-60"
+                >
+                  {geoBusy ? (
+                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+                  ) : (
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  )}
+                  Use my location
+                </button>
               </div>
+              {geoError && (
+                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {geoError}
+                </p>
+              )}
             </div>
 
             <div className="grid gap-5 sm:grid-cols-3">
