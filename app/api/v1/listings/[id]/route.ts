@@ -14,7 +14,7 @@ export async function GET(
     const { user } = await authenticate(request);
 
     const listing = await db.query.listings.findFirst({
-      where: (l) => eq(l.id, id),
+      where: (l, { eq: e, and: a }) => a(e(l.id, id), e(l.isMock, false)),
     });
 
     if (!listing) {
