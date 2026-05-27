@@ -66,38 +66,34 @@ export default function InquiryFormModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setError(null);
+
+    // The v1 inquiries endpoint requires the customer to be signed in;
+    // it derives customerId from the JWT, not the request body.
+    if (!user) {
+      setError("Please sign in before sending an inquiry.");
+      return;
+    }
+
+    setLoading(true);
     try {
-      const res = await fetch("/api/inquiries", {
+      const res = await fetch("/api/v1/inquiries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          venueId,
-          venueTitle,
+          listingId: venueId,
           eventDate,
-          startTime,
-          endTime,
+          eventTime: startTime,
           guestCount,
-          eventType,
-          specialRequirements,
-          customerName,
-          customerEmail,
-          customerPhone,
-          customerWhatsapp: customerPhone,
-          customerId: user?.email ?? null,
+          eventType: eventType || undefined,
+          specialRequirements: specialRequirements || undefined,
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Submission failed" }));
-        throw new Error(err.error || "Submission failed");
+        const err = await res.json().catch(() => null);
+        const detail = err?.error?.details?.[0]?.message;
+        throw new Error(detail || err?.error?.message || "Submission failed");
       }
-      const created = await res.json();
-      try {
-        const stored = JSON.parse(localStorage.getItem("ev_submitted_inquiries") || "[]");
-        stored.unshift(created);
-        localStorage.setItem("ev_submitted_inquiries", JSON.stringify(stored));
-      } catch {}
       setSubmitted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
