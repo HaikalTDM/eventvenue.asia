@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { authenticate, requireRole } from "@/lib/auth/middleware";
 import { handleApiError } from "@/lib/utils/errors";
 import { sql, eq, and, gte, lt, desc } from "drizzle-orm";
 
@@ -33,9 +33,8 @@ function pctChange(curr: number, prev: number): number | null {
 export async function GET(request: NextRequest) {
   try {
     const { user } = await authenticate(request);
-    if (!user || user.role !== "admin") {
-      return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
-    }
+    const roleError = requireRole(user, "admin");
+    if (roleError) return roleError;
 
     const now = new Date();
     const currentMonthStart = startOfMonth(now.getUTCFullYear(), now.getUTCMonth());

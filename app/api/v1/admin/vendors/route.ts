@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { authenticate, requireRole } from "@/lib/auth/middleware";
 import { handleApiError, notFound } from "@/lib/utils/errors";
 import { eq, and, desc } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
     const { user } = await authenticate(request);
-    if (!user || user.role !== "admin") {
-      return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
-    }
+    const roleError = requireRole(user, "admin");
+    if (roleError) return roleError;
 
     const url = new URL(request.url);
     const status = url.searchParams.get("status");
