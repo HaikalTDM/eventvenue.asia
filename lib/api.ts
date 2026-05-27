@@ -24,6 +24,11 @@ export interface ApiListingDetail {
   listingType: "venue" | "service";
   description: string | null;
   location: string | null;
+  state: string | null;
+  city: string | null;
+  district: string | null;
+  latitude: number | null;
+  longitude: number | null;
   address: string | null;
   capacity: number | null;
   pricePerHour: string | null;

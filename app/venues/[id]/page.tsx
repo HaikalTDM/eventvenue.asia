@@ -53,7 +53,10 @@ function mapDetailToVenue(data: ApiListingDetail): Venue {
       text: r.comment || "",
     })),
     faqs: [],
-    coordinates: { lat: 0, lng: 0 },
+    coordinates: {
+      lat: typeof data.latitude === "number" ? data.latitude : 0,
+      lng: typeof data.longitude === "number" ? data.longitude : 0,
+    },
     address: data.address || "",
     blockedDates: data.availability?.blockedDates || [],
   };
