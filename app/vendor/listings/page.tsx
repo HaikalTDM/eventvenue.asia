@@ -7,11 +7,12 @@ import { getVendorProfile, getListings, type ApiListing } from "@/lib/api";
 import VendorPortalLayout from "@/components/VendorPortalLayout";
 
 export default function VendorListingsPage() {
-  const [pausedIds, setPausedIds] = useState<string[]>([]);
   const [listings, setListings] = useState<ApiListing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [vendorType, setVendorType] = useState<"venue_owner" | "service_provider" | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -47,10 +48,28 @@ export default function VendorListingsPage() {
     load();
   }, []);
 
-  const togglePause = (id: string) => {
-    setPausedIds((prev) =>
-      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]
-    );
+  const setListingStatus = async (id: string, newStatus: "active" | "paused" | "draft") => {
+    setBusyId(id);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/v1/listings/${id}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        setActionError(err?.error?.message || "Could not update listing.");
+        return;
+      }
+      setListings((prev) =>
+        prev.map((l) => (l.id === id ? { ...l, status: newStatus } : l))
+      );
+    } catch {
+      setActionError("Network error. Please try again.");
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const isVenue = vendorType === "venue_owner";
@@ -137,8 +156,12 @@ export default function VendorListingsPage() {
             const location = listing.location ?? "";
             const rating = parseFloat(listing.averageRating) || 0;
             const reviewCount = listing.reviewCount;
-            const isPaused = pausedIds.includes(id);
+            const status = (listing as { status?: string }).status ?? "draft";
+            const isDraft = status === "draft";
+            const isPaused = status === "paused";
+            const isActive = status === "active";
             const tags = listing.amenities ?? [];
+            const isBusy = busyId === id;
 
             return (
               <div
@@ -197,12 +220,14 @@ export default function VendorListingsPage() {
                       <div className="flex items-center gap-2">
                         <span
                           className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                            isPaused
+                            isDraft
+                              ? "bg-gray-100 text-gray-600"
+                              : isPaused
                               ? "bg-amber-100 text-amber-700"
                               : "bg-green-100 text-green-700"
                           }`}
                         >
-                          {isPaused ? "Paused" : "Active"}
+                          {isDraft ? "Draft" : isPaused ? "Paused" : "Active"}
                         </span>
                         <span className="flex items-center gap-1 text-sm text-gray-500">
                           <svg
@@ -241,16 +266,29 @@ export default function VendorListingsPage() {
                           Manage Availability
                         </Link>
                       )}
-                      <button
-                        onClick={() => togglePause(id)}
-                        className={`rounded-xl border px-4 py-2 text-sm font-medium transition-colors ${
-                          isPaused
-                            ? "border-green-200 text-green-600 hover:bg-green-50"
-                            : "border-gray-200 text-gray-500 hover:border-red-200 hover:text-[#EB4D4B]"
-                        }`}
-                      >
-                        {isPaused ? "Unpause" : "Pause"}
-                      </button>
+                      {isDraft ? (
+                        <button
+                          onClick={() => setListingStatus(id, "active")}
+                          disabled={isBusy}
+                          className="rounded-xl bg-[#EB4D4B] px-4 py-2 text-sm font-semibold text-white hover:bg-[#dc2626] disabled:opacity-50"
+                        >
+                          {isBusy ? "..." : "Publish"}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            setListingStatus(id, isPaused ? "active" : "paused")
+                          }
+                          disabled={isBusy}
+                          className={`rounded-xl border px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+                            isPaused
+                              ? "border-green-200 text-green-600 hover:bg-green-50"
+                              : "border-gray-200 text-gray-500 hover:border-red-200 hover:text-[#EB4D4B]"
+                          }`}
+                        >
+                          {isBusy ? "..." : isPaused ? "Unpause" : "Pause"}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

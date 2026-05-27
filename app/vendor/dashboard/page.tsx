@@ -38,8 +38,12 @@ export default function VendorDashboardPage() {
         const vendorType =
           profile?.data?.vendorType === "service_provider" ? "service" : "venue";
 
+        // mine=true returns this vendor's listings regardless of status,
+        // so the dashboard sees drafts and paused listings too. The
+        // "Active Listings" card then filters on status==='active'
+        // explicitly instead of relying on the public-endpoint filter.
         const [listingsRes, inquiriesRes, bookingsRes] = await Promise.all([
-          getListings({ listingType: vendorType }).catch(() => null),
+          getListings({ mine: "true", listingType: vendorType }).catch(() => null),
           getVendorInquiries().catch(() => ({ data: [] })),
           getVendorBookings().catch(() => ({ data: [] })),
         ]);
