@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { requireUser } from "@/lib/auth/server";
 import { handleApiError } from "@/lib/utils/errors";
 import { eq, and, inArray } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireUser();
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const favorites = await db.query.favorites.findMany({
-      where: (f) => eq(f.customerId, user!.sub),
+      where: (f) => eq(f.customerId, user.id),
       orderBy: (f, { desc }) => desc(f.createdAt),
     });
 
@@ -33,10 +32,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireUser();
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const { listingId } = await request.json();
     if (!listingId) {
@@ -48,7 +46,7 @@ export async function POST(request: NextRequest) {
 
     await db
       .insert(schema.favorites)
-      .values({ customerId: user.sub, listingId })
+      .values({ customerId: user.id, listingId })
       .onConflictDoNothing();
 
     return NextResponse.json({ success: true }, { status: 201 });
@@ -59,10 +57,9 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireUser();
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const url = new URL(request.url);
     const listingId = url.searchParams.get("listingId");
@@ -77,7 +74,7 @@ export async function DELETE(request: NextRequest) {
       .delete(schema.favorites)
       .where(
         and(
-          eq(schema.favorites.customerId, user.sub),
+          eq(schema.favorites.customerId, user.id),
           eq(schema.favorites.listingId, listingId)
         )
       );

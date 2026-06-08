@@ -4,33 +4,37 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
+import { useAuth } from "@/lib/auth/provider";
+
 export default function AdminLoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
+  const { signInWithPassword, signOut } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const res = await fetch("/api/v1/auth/sign-in", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        setError(data?.error?.message || "Invalid email or password.");
+      const result = await signInWithPassword(email, password);
+      if (!result.ok) {
+        setError(result.error || "Invalid email or password.");
         return;
       }
-      const data = await res.json();
-      if (data?.user?.role !== "admin") {
+
+      // Reject any non-admin account immediately and revoke the session we
+      // just created so they don't hold a valid cookie they didn't intend to
+      // get. Without this, a customer/vendor who tries the admin login form
+      // would silently end up signed in as their own role.
+      if (result.user?.role !== "admin") {
+        await signOut();
         setError("This account is not an admin. Use the customer or vendor sign-in pages.");
         return;
       }
+
       router.push("/admin/dashboard");
       router.refresh();
     } catch {

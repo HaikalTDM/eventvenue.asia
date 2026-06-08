@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useVendorAuth } from "@/lib/vendor-auth";
+import { useAuth } from "@/lib/auth/provider";
 
 export default function VendorLoginPage() {
   const [email, setEmail] = useState("");
@@ -11,20 +11,32 @@ export default function VendorLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const { login } = useVendorAuth();
   const router = useRouter();
+  const { signInWithPassword, signOut } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const success = await login(email, password);
-    setLoading(false);
-    if (success) {
+    try {
+      const result = await signInWithPassword(email, password);
+      if (!result.ok) {
+        setError(result.error || "Invalid email or password.");
+        return;
+      }
+
+      if (result.user?.role !== "vendor") {
+        await signOut();
+        setError("This account is not a vendor. Use the customer sign-in page instead.");
+        return;
+      }
+
       router.push("/vendor/dashboard");
       router.refresh();
-    } else {
-      setError("Invalid credentials, or this account is not a vendor.");
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
     }
   };
 

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
+import { useCreateInquiry } from "@/hooks/use-inquiries";
 import CustomDatePicker from "@/components/CustomDatePicker";
 import CustomTimePicker from "@/components/CustomTimePicker";
 
@@ -58,9 +59,11 @@ export default function InquiryFormModal({
 
   const selectedEventLabel = eventTypeOptions.find((o) => o.value === eventType)?.label || "Select event type";
   const [specialRequirements, setSpecialRequirements] = useState("");
-  const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const createInquiry = useCreateInquiry();
+  const loading = createInquiry.isPending;
 
   if (!isOpen) return null;
 
@@ -68,37 +71,26 @@ export default function InquiryFormModal({
     e.preventDefault();
     setError(null);
 
-    // The v1 inquiries endpoint requires the customer to be signed in;
-    // it derives customerId from the JWT, not the request body.
     if (!user) {
       setError("Please sign in before sending an inquiry.");
       return;
     }
 
-    setLoading(true);
+    const estimatedCost = Math.max(3, parseInt(endTime, 10) - parseInt(startTime, 10)) * pricePerHour;
+
     try {
-      const res = await fetch("/api/v1/inquiries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          listingId: venueId,
-          eventDate,
-          eventTime: startTime,
-          guestCount,
-          eventType: eventType || undefined,
-          specialRequirements: specialRequirements || undefined,
-        }),
+      await createInquiry.mutateAsync({
+        listingId: venueId,
+        eventDate,
+        eventTime: startTime,
+        guestCount,
+        eventType: eventType || undefined,
+        specialRequirements: specialRequirements || undefined,
+        totalPrice: estimatedCost,
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        const detail = err?.error?.details?.[0]?.message;
-        throw new Error(detail || err?.error?.message || "Submission failed");
-      }
       setSubmitted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setLoading(false);
     }
   };
 

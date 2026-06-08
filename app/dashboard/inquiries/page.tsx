@@ -1,26 +1,22 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { getMyInquiries } from "@/lib/api";
+import { useMyInquiries } from "@/hooks/use-inquiries";
 import type { ApiInquiry } from "@/lib/api";
 import type { InquiryStatus, Inquiry } from "@/lib/types";
 
 const statusLabels: Record<InquiryStatus, { label: string; color: string }> = {
-  accept: { label: "Accept", color: "bg-blue-100 text-blue-700" },
-  approve: { label: "Approve", color: "bg-indigo-100 text-indigo-700" },
-  proceed: { label: "Proceed", color: "bg-amber-100 text-amber-700" },
-  ongoing: { label: "Ongoing", color: "bg-orange-100 text-orange-700" },
-  completed: { label: "Complete", color: "bg-green-100 text-green-700" },
+  pending: { label: "Pending", color: "bg-yellow-100 text-yellow-700" },
+  accepted: { label: "Accepted", color: "bg-blue-100 text-blue-700" },
+  completed: { label: "Completed", color: "bg-emerald-100 text-emerald-700" },
   cancelled: { label: "Cancelled", color: "bg-red-100 text-red-700" },
 };
 
 const allStatuses: InquiryStatus[] = [
-  "accept",
-  "approve",
-  "proceed",
-  "ongoing",
+  "pending",
+  "accepted",
   "completed",
   "cancelled",
 ];
@@ -55,29 +51,15 @@ function getVenueSlugById(
 }
 
 export default function InquiriesPage() {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<InquiryStatus | "all">("all");
-  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
-  const [rawInquiries, setRawInquiries] = useState<ApiInquiry[]>([]);
 
-  const fetchInquiries = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await getMyInquiries();
-      setRawInquiries(res.data);
-      setInquiries(res.data.map(apiToInquiry));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load inquiries");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data: rawInquiries = [], isLoading: loading, error, refetch } =
+    useMyInquiries();
 
-  useEffect(() => {
-    fetchInquiries();
-  }, [fetchInquiries]);
+  const inquiries = useMemo<Inquiry[]>(
+    () => rawInquiries.map(apiToInquiry),
+    [rawInquiries]
+  );
 
   const filtered =
     activeFilter === "all"
@@ -114,9 +96,9 @@ export default function InquiriesPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
           </svg>
           <h3 className="mt-3 text-sm font-semibold text-red-700">Failed to load inquiries</h3>
-          <p className="mt-1 text-xs text-red-500">{error}</p>
+          <p className="mt-1 text-xs text-red-500">{error.message}</p>
           <button
-            onClick={fetchInquiries}
+            onClick={() => refetch()}
             className="mt-4 rounded-xl bg-red-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
           >
             Retry
@@ -132,8 +114,8 @@ export default function InquiriesPage() {
         <div className="animate-pulse">
           <div className="h-8 w-40 rounded-lg bg-gray-200" />
           <div className="mt-2 h-4 w-80 rounded-lg bg-gray-200" />
-          <div className="mt-6 grid grid-cols-7 gap-3">
-            {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+      <div className="mt-6 grid grid-cols-5 gap-3">
+            {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="rounded-xl border border-gray-200 bg-white p-3">
                 <div className="mx-auto h-6 w-8 rounded bg-gray-200" />
                 <div className="mx-auto mt-1 h-3 w-14 rounded bg-gray-200" />
@@ -179,7 +161,7 @@ export default function InquiriesPage() {
         </Link>
       </div>
 
-      <div className="mt-6 grid grid-cols-3 gap-3 sm:grid-cols-7">
+      <div className="mt-6 grid grid-cols-5 gap-3">
         <button
           onClick={() => setActiveFilter("all")}
           className={`rounded-xl p-3 text-center transition-all ${

@@ -1,123 +1,143 @@
-import { NextRequest, NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
+import { NextResponse, type NextRequest } from "next/server";
+
+import { getSupabaseServerClient } from "@/lib/auth/server";
 import { db, schema } from "@/lib/db";
-import { signAccessToken, signRefreshToken } from "@/lib/auth/jwt";
 import { vendorRegisterSchema } from "@/lib/validators/auth.schema";
-import { handleApiError, conflict, validationError } from "@/lib/utils/errors";
 
+/**
+ * POST /api/v1/vendors/register
+ *
+ * Single-shot vendor signup. Creates the auth identity, the bridged
+ * `public.users` row (via the `handle_new_auth_user` trigger), the
+ * `vendor_profiles` row, and any submitted `vendor_documents` rows.
+ *
+ * Flow:
+ *   1. Validate the body against `vendorRegisterSchema`.
+ *   2. `supabase.auth.signUp` with `role='vendor'` in user metadata so the
+ *      DB trigger writes `public.users.role = 'vendor'` automatically.
+ *   3. Insert `vendor_profiles` referencing the new auth user id.
+ *   4. Insert any pending document rows; status defaults to 'pending'.
+ *
+ * If profile creation fails after auth signup we surface the error but do
+ * not roll back the auth user — they can retry by signing in and
+ * completing onboarding from the vendor portal.
+ */
 export async function POST(request: NextRequest) {
+  let body: unknown;
   try {
-    const body = await request.json();
-    const parsed = vendorRegisterSchema.safeParse(body);
-    if (!parsed.success) {
-      throw validationError(
-        parsed.error.issues.map((i) => ({ field: i.path.join("."), message: i.message }))
-      );
-    }
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: { message: "Invalid JSON body." } },
+      { status: 400 }
+    );
+  }
 
-    const { vendorType, businessName, businessDescription, businessWebsite, businessLocation, serviceCategory, user: userData, documents } = parsed.data;
+  const parsed = vendorRegisterSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      {
+        error: {
+          message: "Invalid input.",
+          details: parsed.error.issues.map((i) => ({
+            path: i.path.join("."),
+            message: i.message,
+          })),
+        },
+      },
+      { status: 400 }
+    );
+  }
 
-    const existing = await db.query.users.findFirst({
-      where: (u, { eq }) => eq(u.email, userData.email.toLowerCase()),
-    });
-    if (existing) {
-      throw conflict("Email already registered");
-    }
+  const input = parsed.data;
+  const supabase = await getSupabaseServerClient();
 
-    const passwordHash = await bcrypt.hash(userData.password, 12);
+  // Build the redirect URL from the request origin so OAuth-style email
+  // confirmations land back on this instance, not a hard-coded host.
+  const origin =
+    request.nextUrl.origin ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    "http://localhost:3000";
 
-    const [user] = await db
-      .insert(schema.users)
-      .values({
-        name: userData.name,
-        email: userData.email.toLowerCase(),
-        passwordHash,
-        phone: userData.phone || null,
+  const { data: authData, error: signUpError } = await supabase.auth.signUp({
+    email: input.user.email,
+    password: input.user.password,
+    options: {
+      // Surface to the auth.users → public.users trigger.
+      data: {
+        name: input.user.name,
+        phone: input.user.phone ?? null,
         role: "vendor",
-        authProvider: "credentials",
-      })
-      .returning();
+      },
+      emailRedirectTo: `${origin}/auth/callback`,
+    },
+  });
 
-    const [profile] = await db
+  if (signUpError || !authData.user) {
+    return NextResponse.json(
+      {
+        error: {
+          message: signUpError?.message ?? "Could not create account.",
+        },
+      },
+      { status: 400 }
+    );
+  }
+
+  const authUserId = authData.user.id;
+
+  // The trigger should have already inserted public.users. If for any reason
+  // the trigger hasn't fired yet (rare during long-running migrations), the
+  // FK insert below would fail — surface a clear error rather than a
+  // generic 500.
+  try {
+    const [vendor] = await db
       .insert(schema.vendorProfiles)
       .values({
-        userId: user.id,
-        vendorType,
-        businessName,
-        businessDescription: businessDescription || null,
-        businessWebsite: businessWebsite || null,
-        businessLocation: businessLocation || null,
-        serviceCategory: serviceCategory || null,
-        verificationStatus: "pending",
-        verificationBadge: "none",
+        userId: authUserId,
+        vendorType: input.vendorType,
+        businessName: input.businessName,
+        businessDescription: input.businessDescription ?? null,
+        businessWebsite:
+          input.businessWebsite && input.businessWebsite !== ""
+            ? input.businessWebsite
+            : null,
+        businessLocation: input.businessLocation ?? null,
+        serviceCategory: input.serviceCategory ?? null,
       })
-      .returning();
+      .returning({ id: schema.vendorProfiles.id });
 
-    if (documents && documents.length > 0) {
+    if (input.documents && input.documents.length > 0) {
       await db.insert(schema.vendorDocuments).values(
-        documents.map((doc) => ({
-          vendorId: profile.id,
+        input.documents.map((doc) => ({
+          vendorId: vendor.id,
           docType: doc.docType,
           fileUrl: doc.fileUrl,
-          status: "pending" as const,
         }))
       );
     }
 
-    const accessToken = await signAccessToken({
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-      vendorId: profile.id,
-      vendorType: profile.vendorType,
-    });
-
-    const refreshToken = await signRefreshToken(user.id);
-
-    const response = NextResponse.json(
+    return NextResponse.json(
       {
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          isVerified: user.isVerified,
-          createdAt: user.createdAt,
-        },
-        vendor: {
-          id: profile.id,
-          vendorType: profile.vendorType,
-          businessName: profile.businessName,
-          verificationStatus: profile.verificationStatus,
-          verificationBadge: profile.verificationBadge,
-          createdAt: profile.createdAt,
-        },
-        token: {
-          accessToken,
-          expiresIn: parseInt(process.env.JWT_EXPIRES_IN || "3600", 10),
+        data: {
+          vendorId: vendor.id,
+          userId: authUserId,
+          needsEmailVerification: !authData.session,
         },
       },
       { status: 201 }
     );
-
-    response.cookies.set("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 7,
-    });
-
-    response.cookies.set("accessToken", accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: parseInt(process.env.JWT_EXPIRES_IN || "3600", 10),
-    });
-
-    return response;
-  } catch (error) {
-    return handleApiError(error);
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error: {
+          message:
+            err instanceof Error
+              ? err.message
+              : "Vendor profile creation failed.",
+        },
+      },
+      { status: 500 }
+    );
   }
 }

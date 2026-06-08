@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { requireUser } from "@/lib/auth/server";
 import { handleApiError, notFound } from "@/lib/utils/errors";
 import { eq, and, desc, asc } from "drizzle-orm";
 
@@ -10,14 +10,13 @@ export async function GET(
 ) {
   try {
     const { id: conversationId } = await params;
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireUser();
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const participant = await db.query.conversationParticipants.findFirst({
       where: (cp, { eq: eqFn, and: andFn }) =>
-        andFn(eqFn(cp.conversationId, conversationId), eqFn(cp.userId, user.sub)),
+        andFn(eqFn(cp.conversationId, conversationId), eqFn(cp.userId, user.id)),
     });
     if (!participant) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
@@ -44,14 +43,13 @@ export async function POST(
 ) {
   try {
     const { id: conversationId } = await params;
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireUser();
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const participant = await db.query.conversationParticipants.findFirst({
       where: (cp, { eq: eqFn, and: andFn }) =>
-        andFn(eqFn(cp.conversationId, conversationId), eqFn(cp.userId, user.sub)),
+        andFn(eqFn(cp.conversationId, conversationId), eqFn(cp.userId, user.id)),
     });
     if (!participant) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
@@ -68,7 +66,7 @@ export async function POST(
 
     const [message] = await db
       .insert(schema.messages)
-      .values({ conversationId, senderId: user.sub, content })
+      .values({ conversationId, senderId: user.id, content })
       .returning();
 
     await db
@@ -77,7 +75,7 @@ export async function POST(
       .where(
         and(
           eq(schema.conversationParticipants.conversationId, conversationId),
-          eq(schema.conversationParticipants.userId, user.sub)
+          eq(schema.conversationParticipants.userId, user.id)
         )
       );
 
@@ -93,10 +91,9 @@ export async function PUT(
 ) {
   try {
     const { id: conversationId } = await params;
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireUser();
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     await db
       .update(schema.conversationParticipants)
@@ -104,7 +101,7 @@ export async function PUT(
       .where(
         and(
           eq(schema.conversationParticipants.conversationId, conversationId),
-          eq(schema.conversationParticipants.userId, user.sub)
+          eq(schema.conversationParticipants.userId, user.id)
         )
       );
 

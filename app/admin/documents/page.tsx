@@ -1,33 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
-type DocStatus = "pending" | "approved" | "rejected";
+import {
+  useAdminDocuments,
+  useReviewDocument,
+  type ApiDocument,
+} from "@/hooks/use-admin";
 
-interface ApiDocument {
-  id: string;
-  docType: "business_license" | "halal_cert" | "identity" | "other";
-  fileUrl: string;
-  status: DocStatus;
-  rejectReason: string | null;
-  createdAt: string;
-  reviewedAt: string | null;
-  vendor: {
-    id: string;
-    businessName: string;
-    ownerName: string | null;
-    ownerEmail: string | null;
-  } | null;
-}
+type DocType = "business_license" | "halal_cert" | "identity" | "other";
 
-const docTypeLabels: Record<ApiDocument["docType"], string> = {
+const docTypeLabels: Record<DocType, string> = {
   business_license: "SSM Business Registration",
   halal_cert: "Halal Certificate (JAKIM)",
   identity: "Identity Document",
   other: "Other",
 };
 
-const docTypeColors: Record<ApiDocument["docType"], string> = {
+const docTypeColors: Record<DocType, string> = {
   business_license: "bg-blue-500/10 text-blue-400",
   halal_cert: "bg-green-500/10 text-green-400",
   identity: "bg-purple-500/10 text-purple-400",
@@ -47,78 +37,31 @@ function relativeTime(iso: string): string {
 }
 
 export default function AdminDocumentsPage() {
-  const [documents, setDocuments] = useState<ApiDocument[]>([]);
   const [filter, setFilter] = useState<"pending" | "approved" | "rejected" | "all">("pending");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ status: filter, limit: "100" });
-      const res = await fetch(`/api/v1/admin/documents?${params.toString()}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) {
-        setError("Could not load documents.");
-        return;
-      }
-      const json = await res.json();
-      setDocuments(json.data as ApiDocument[]);
-    } catch {
-      setError("Network error.");
-    } finally {
-      setLoading(false);
-    }
-  }, [filter]);
+  const { data: documents = [], isLoading: loading, error } = useAdminDocuments(filter);
+  const review = useReviewDocument();
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const handleApprove = async (id: string) => {
-    setBusyId(id);
-    try {
-      const res = await fetch(
-        `/api/v1/admin/documents?docId=${id}&action=approve`,
-        { method: "PUT" }
-      );
-      if (!res.ok) {
-        setError("Could not approve document.");
-        return;
-      }
-      await load();
-    } finally {
-      setBusyId(null);
-    }
+  const handleApprove = (id: string) => {
+    review.mutate({ docId: id, action: "approve" });
   };
 
-  const handleReject = async (id: string) => {
-    setBusyId(id);
-    try {
-      const res = await fetch(
-        `/api/v1/admin/documents?docId=${id}&action=reject`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reason: rejectReason || "Document rejected" }),
-        }
-      );
-      if (!res.ok) {
-        setError("Could not reject document.");
-        return;
+  const handleReject = (id: string) => {
+    review.mutate(
+      { docId: id, action: "reject", reason: rejectReason || "Document rejected" },
+      {
+        onSuccess: () => {
+          setRejectingId(null);
+          setRejectReason("");
+        },
       }
-      setRejectingId(null);
-      setRejectReason("");
-      await load();
-    } finally {
-      setBusyId(null);
-    }
+    );
   };
+
+  const busyId = review.isPending ? review.variables?.docId ?? null : null;
+  const errorMessage = error?.message ?? null;
 
   const pendingCount = documents.filter((d) => d.status === "pending").length;
 
@@ -138,7 +81,7 @@ export default function AdminDocumentsPage() {
 
       {error && (
         <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          {error}
+          {errorMessage}
         </div>
       )}
 
@@ -197,9 +140,9 @@ export default function AdminDocumentsPage() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span
-                          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${docTypeColors[doc.docType]}`}
+                          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${docTypeColors[doc.docType as DocType] ?? docTypeColors.other}`}
                         >
-                          {docTypeLabels[doc.docType]}
+                          {docTypeLabels[doc.docType as DocType] ?? docTypeLabels.other}
                         </span>
                       </div>
                       <p className="mt-1.5 text-sm font-medium text-white">

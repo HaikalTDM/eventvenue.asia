@@ -1,11 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useMemo, useState } from "react";
 import type { FilterState, Venue, SearchState } from "@/lib/types";
-import { getListings } from "@/lib/api";
-import type { ApiListingsResponse, ApiListing } from "@/lib/api";
-import { useDataMode } from "@/lib/data-mode";
-import { mockVenues, amenityOptions, eventTypeOptions } from "@/lib/mock-data";
+import { useListings, type ApiListing } from "@/hooks/use-listings";
 import SidebarFilter from "@/components/SidebarFilter";
 import VenueGrid from "@/components/VenueGrid";
 import LocationCascade, { type LocationSelection } from "@/components/LocationCascade";
@@ -54,16 +51,6 @@ const defaultSearch: SearchState = {
 export default function VenueGridWithFilters({
   search = defaultSearch,
 }: VenueGridWithFiltersProps) {
-  const { mode } = useDataMode();
-  const [venues, setVenues] = useState<Venue[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [amenityFilterOptions, setAmenityFilterOptions] = useState<
-    { label: string; key: string }[]
-  >([]);
-  const [eventTypeFilterOptions, setEventTypeFilterOptions] = useState<
-    { label: string; key: string }[]
-  >([]);
   const [filters, setFilters] = useState<FilterState>({
     amenities: [],
     eventTypes: [],
@@ -90,95 +77,66 @@ export default function VenueGridWithFilters({
     jakarta: "Jakarta",
   };
 
-  const fetchVenues = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  // Compute the API params from the current search and sidebar selections.
+  // Memoised so the React Query key only changes when an input actually changes
+  // — otherwise the hook would refetch on every parent re-render.
+  const queryParams = useMemo(() => {
+    const params: Record<string, string | number | boolean | undefined> = {
+      type: "venue",
+      limit: 20,
+    };
 
-    if (mode === "mock") {
-      let filtered = mockVenues;
-      if (search.location) {
-        const locationStr = locationKeyMap[search.location];
-        if (locationStr) {
-          filtered = filtered.filter((v) =>
-            v.location.toLowerCase().includes(locationStr.toLowerCase())
-          );
-        }
+    if (search.location) {
+      const locationStr = locationKeyMap[search.location];
+      if (locationStr) {
+        // Map the legacy hero-search "kl" / "pj" keys onto the city filter
+        // the new API actually accepts.
+        params.city = locationStr;
       }
-      if (search.halalOnly) {
-        filtered = filtered.filter((v) => v.halalVerified);
-      }
-      if (search.guestCapacity > 0) {
-        filtered = filtered.filter((v) => v.capacity >= search.guestCapacity);
-      }
-      setVenues(filtered);
-      setAmenityFilterOptions(amenityOptions);
-      setEventTypeFilterOptions(eventTypeOptions);
-      setLoading(false);
-      return;
     }
+    if (locationSelection.state) params.state = locationSelection.state;
+    if (locationSelection.city) params.city = locationSelection.city;
+    if (locationSelection.district) params.district = locationSelection.district;
+    if (search.halalOnly) params.halalOnly = true;
+    if (search.guestCapacity > 0) params.minCapacity = search.guestCapacity;
 
-    try {
-      const params: Record<string, string> = {
-        type: "venue",
-        limit: "20",
-      };
+    return params as Parameters<typeof useListings>[0];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    search.location,
+    search.halalOnly,
+    search.guestCapacity,
+    locationSelection.state,
+    locationSelection.city,
+    locationSelection.district,
+  ]);
 
-      if (search.location) {
-        const locationStr = locationKeyMap[search.location];
-        if (locationStr) {
-          params.location = locationStr;
-        }
-      }
+  const { data, isLoading, error, refetch } = useListings(queryParams);
 
-      if (locationSelection.state) params.state = locationSelection.state;
-      if (locationSelection.city) params.city = locationSelection.city;
-      if (locationSelection.district) params.district = locationSelection.district;
+  const venues = useMemo(
+    () => (data?.data ?? []).map(mapListingToVenue),
+    [data]
+  );
 
-      if (
-        geoFilter.latitude !== null &&
-        geoFilter.longitude !== null
-      ) {
-        params.lat = String(geoFilter.latitude);
-        params.lng = String(geoFilter.longitude);
-        params.radius = String(geoFilter.radiusKm);
-        params.sort = "distance";
-      }
+  const amenityFilterOptions = useMemo(
+    () =>
+      (data?.filters?.amenities ?? []).map((a) => ({
+        label: a.name,
+        key: a.name.toLowerCase().replace(/\s+/g, "_"),
+      })),
+    [data]
+  );
 
-      if (search.halalOnly) {
-        params.halalCertified = "true";
-      }
+  const eventTypeFilterOptions = useMemo(
+    () =>
+      (data?.filters?.eventTypes ?? []).map((e) => ({
+        label: e.name,
+        key: e.name.toLowerCase().replace(/\s+/g, "_"),
+      })),
+    [data]
+  );
 
-      if (search.guestCapacity > 0) {
-        params.capacity = String(search.guestCapacity);
-      }
-
-      const response: ApiListingsResponse = await getListings(params);
-
-      const mappedVenues = response.data.map(mapListingToVenue);
-      setVenues(mappedVenues);
-
-      if (response.filters) {
-        const amenityOpts = (response.filters.amenities || []).map((a) => ({
-          label: a.name,
-          key: a.name.toLowerCase().replace(/\s+/g, "_"),
-        }));
-        const eventTypeOpts = (response.filters.eventTypes || []).map((e) => ({
-          label: e.name,
-          key: e.name.toLowerCase().replace(/\s+/g, "_"),
-        }));
-        setAmenityFilterOptions(amenityOpts);
-        setEventTypeFilterOptions(eventTypeOpts);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load venues");
-    } finally {
-      setLoading(false);
-    }
-  }, [search.location, search.halalOnly, search.guestCapacity]);
-
-  useEffect(() => {
-    fetchVenues();
-  }, [fetchVenues]);
+  const loading = isLoading;
 
   const amenityKeys = filters.amenities;
   const eventTypeKeys = filters.eventTypes;
@@ -250,9 +208,9 @@ export default function VenueGridWithFilters({
                 d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
               />
             </svg>
-            <p className="text-gray-600">{error}</p>
+            <p className="text-gray-600">{error.message}</p>
             <button
-              onClick={fetchVenues}
+              onClick={() => refetch()}
               className="mt-4 rounded-xl bg-[#EB4D4B] px-6 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-[#dc2626]"
             >
               Try Again

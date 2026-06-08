@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import { AuthProvider } from "@/lib/auth";
-import { FavoritesProvider } from "@/lib/favorites";
+import { AuthProvider } from "@/lib/auth/provider";
 import { PageVisibilityProvider } from "@/lib/page-visibility";
-import { DataModeProvider } from "@/lib/data-mode";
+import { QueryProvider } from "@/lib/query-provider";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -29,13 +28,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className} suppressHydrationWarning>
-        <DataModeProvider>
+        <QueryProvider>
           <AuthProvider>
-            <FavoritesProvider>
-              <PageVisibilityProvider>{children}</PageVisibilityProvider>
-            </FavoritesProvider>
+            <PageVisibilityProvider>{children}</PageVisibilityProvider>
           </AuthProvider>
-        </DataModeProvider>
+        </QueryProvider>
       </body>
     </html>
   );

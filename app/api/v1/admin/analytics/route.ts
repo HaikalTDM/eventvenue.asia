@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate, requireRole } from "@/lib/auth/middleware";
+import { requireRole } from "@/lib/auth/server";
 import { handleApiError } from "@/lib/utils/errors";
 import { sql, eq, and, gte, lt, desc } from "drizzle-orm";
 
@@ -30,11 +30,10 @@ function pctChange(curr: number, prev: number): number | null {
  * database. Mock-flagged listings are excluded from joined queries; the
  * bookings and inquiries tables contain only real activity.
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const { user } = await authenticate(request);
-    const roleError = requireRole(user, "admin");
-    if (roleError) return roleError;
+    const userOrResp = await requireRole("admin");
+    if (userOrResp instanceof NextResponse) return userOrResp;
 
     const now = new Date();
     const currentMonthStart = startOfMonth(now.getUTCFullYear(), now.getUTCMonth());

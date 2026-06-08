@@ -1,14 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate, requireRole } from "@/lib/auth/middleware";
+import { requireRole } from "@/lib/auth/server";
 import { handleApiError } from "@/lib/utils/errors";
 import { eq, and } from "drizzle-orm";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const { user } = await authenticate(request);
-    const roleError = requireRole(user, "admin");
-    if (roleError) return roleError;
+    const userOrResp = await requireRole("admin");
+    if (userOrResp instanceof NextResponse) return userOrResp;
 
     // Counts exclude seeded mock rows (isMock=true) so admins see real
     // production activity. The mock data stays in the DB as a demo

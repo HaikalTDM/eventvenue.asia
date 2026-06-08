@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and, inArray, desc, type SQL } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
-import { authenticate, requireRole } from "@/lib/auth/middleware";
+import { requireRole } from "@/lib/auth/server";
 import { handleApiError, notFound } from "@/lib/utils/errors";
 
 /**
@@ -17,9 +17,8 @@ import { handleApiError, notFound } from "@/lib/utils/errors";
  */
 export async function GET(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    const roleError = requireRole(user, "admin");
-    if (roleError) return roleError;
+    const userOrResp = await requireRole("admin");
+    if (userOrResp instanceof NextResponse) return userOrResp;
 
     const url = new URL(request.url);
     const status = url.searchParams.get("status") ?? "pending";
@@ -157,9 +156,9 @@ export async function GET(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    const roleError = requireRole(user, "admin");
-    if (roleError) return roleError;
+    const userOrResp = await requireRole("admin");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const url = new URL(request.url);
     const flagId = url.searchParams.get("flagId");
@@ -207,7 +206,7 @@ export async function PUT(request: NextRequest) {
       .update(schema.contentFlags)
       .set({
         status: "resolved",
-        resolvedBy: user!.sub,
+        resolvedBy: user.id,
         resolvedAt: new Date(),
       })
       .where(eq(schema.contentFlags.id, flagId));

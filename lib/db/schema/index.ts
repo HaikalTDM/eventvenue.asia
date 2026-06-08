@@ -1,5 +1,6 @@
 import {
   pgTable,
+  pgSchema,
   uuid,
   varchar,
   text,
@@ -16,12 +17,23 @@ import {
   check,
   pgEnum,
   primaryKey,
-  foreignKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
+/**
+ * Reference to Supabase's managed `auth.users` table. Drizzle does not own
+ * this table — it is created and maintained by Supabase Auth (GoTrue) — but we
+ * declare a slim handle so foreign keys from `public.users` can reference it.
+ *
+ * A trigger on `auth.users` (see migrations) inserts a matching row into
+ * `public.users` whenever a new authenticated identity is created.
+ */
+export const authSchema = pgSchema("auth");
+export const authUsers = authSchema.table("users", {
+  id: uuid("id").primaryKey(),
+});
+
 export const userRoleEnum = pgEnum("user_role", ["customer", "vendor", "admin"]);
-export const authProviderEnum = pgEnum("auth_provider", ["credentials", "google", "apple"]);
 export const vendorTypeEnum = pgEnum("vendor_type", ["venue_owner", "service_provider"]);
 export const vendorVerificationStatusEnum = pgEnum("vendor_verification_status", ["pending", "approved", "rejected"]);
 export const verificationBadgeEnum = pgEnum("verification_badge", ["none", "verified", "premium"]);
@@ -38,22 +50,26 @@ export const flagTargetTypeEnum = pgEnum("flag_target_type", ["review", "listing
 export const flagStatusEnum = pgEnum("flag_status", ["pending", "resolved"]);
 
 export const users = pgTable("users", {
-  id: uuid("id").defaultRandom().primaryKey(),
+  // Mirrors auth.users(id) one-to-one. A trigger on auth.users insert creates
+  // the matching row here so application code can join freely without round-tripping
+  // to the auth schema. The cascade ensures cleanup when an auth identity is removed.
+  id: uuid("id").primaryKey().references(() => authUsers.id, { onDelete: "cascade" }),
   email: varchar("email", { length: 255 }).notNull().unique(),
-  passwordHash: varchar("password_hash", { length: 255 }),
   name: varchar("name", { length: 255 }).notNull(),
   phone: varchar("phone", { length: 20 }),
   avatarUrl: text("avatar_url"),
   role: userRoleEnum("role").notNull().default("customer"),
-  authProvider: authProviderEnum("auth_provider").notNull().default("credentials"),
   isVerified: boolean("is_verified").notNull().default(false),
   isSuspended: boolean("is_suspended").notNull().default(false),
   suspendedReason: text("suspended_reason"),
+  // Mock flag is retained only for the seed-from-mock workflow and is dropped
+  // before launch (see Phase 3 cleanup migration).
   isMock: boolean("is_mock").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   index("idx_users_email").on(table.email),
+  index("idx_users_role").on(table.role),
 ]);
 
 export const vendorProfiles = pgTable("vendor_profiles", {
@@ -103,7 +119,6 @@ export const listings = pgTable("listings", {
   district: varchar("district", { length: 100 }),
   latitude: decimal("latitude", { precision: 10, scale: 7 }),
   longitude: decimal("longitude", { precision: 10, scale: 7 }),
-  coordinates: text("coordinates"),
   address: text("address"),
   capacity: integer("capacity"),
   pricePerHour: decimal("price_per_hour", { precision: 10, scale: 2 }),
@@ -229,6 +244,7 @@ export const inquiries = pgTable("inquiries", {
   guestCount: integer("guest_count").notNull(),
   eventType: varchar("event_type", { length: 50 }),
   specialRequirements: text("special_requirements"),
+  totalPrice: decimal("total_price"),
   status: inquiryStatusEnum("status").notNull().default("pending"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -386,4 +402,62 @@ export const passwordResets = pgTable("password_resets", {
 }, (table) => [
   index("idx_password_resets_user_id").on(table.userId),
   index("idx_password_resets_expires_at").on(table.expiresAt),
+]);
+
+// ─── Notifications ─────────────────────────────────────────────────────────────
+// In-app notifications shown in the bell dropdown and pushed via Supabase
+// Realtime to a per-user channel (`user:{id}:notifications`).
+//
+// `type` is a free-form string (not an enum) so new notification kinds can ship
+// without a migration. Known values today:
+//   inquiry_received, inquiry_status_changed, booking_confirmed,
+//   booking_cancelled, message_received, document_approved, document_rejected,
+//   listing_flagged, vendor_verified.
+//
+// `link` is the in-app path to navigate to when the user clicks the notification.
+
+export const notificationTypeEnum = pgEnum("notification_channel", ["in_app", "email", "push"]);
+
+export const notifications = pgTable("notifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: varchar("type", { length: 50 }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  body: text("body"),
+  link: text("link"),
+  metadata: jsonb("metadata"),
+  isRead: boolean("is_read").notNull().default(false),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_notifications_user_id").on(table.userId),
+  index("idx_notifications_user_unread").on(table.userId, table.isRead),
+  index("idx_notifications_created_at").on(table.userId, table.createdAt),
+]);
+
+// ─── Audit log ─────────────────────────────────────────────────────────────────
+// Append-only record of privileged writes. Every admin action (suspend user,
+// approve vendor, resolve flag, force-cancel booking) inserts one row here.
+// Vendor-side sensitive writes (deleting a listing, transferring ownership)
+// can also log here. Consumers: the admin audit page, security review.
+//
+// `actorId` is nullable so system-initiated actions (cron, webhooks) can still
+// log. `targetTable`/`targetId` form a polymorphic pointer to the affected row.
+// `before` and `before` are full row snapshots for diffability.
+
+export const auditLog = pgTable("audit_log", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+  action: varchar("action", { length: 100 }).notNull(),
+  targetTable: varchar("target_table", { length: 100 }).notNull(),
+  targetId: uuid("target_id"),
+  before: jsonb("before"),
+  after: jsonb("after"),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_audit_log_actor_id").on(table.actorId),
+  index("idx_audit_log_target").on(table.targetTable, table.targetId),
+  index("idx_audit_log_created_at").on(table.createdAt),
 ]);

@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { getListingDetail, type ApiListingDetail } from "@/lib/api";
+import { useListing } from "@/hooks/use-listings";
+import type { ApiListingDetail } from "@/lib/api";
 import VendorPortalLayout from "@/components/VendorPortalLayout";
 
 const eventTypeOptions = [
@@ -30,9 +31,8 @@ export default function EditVenuePage() {
   const listingId = params.id as string;
 
   const [listing, setListing] = useState<ApiListingDetail | null>(null);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   const [title, setTitle] = useState("");
@@ -46,38 +46,28 @@ export default function EditVenuePage() {
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   const [halalVerified, setHalalVerified] = useState(false);
 
+  const {
+    data: detail,
+    isLoading: loading,
+    error: loadError,
+  } = useListing(listingId);
+
   useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const result = await getListingDetail(listingId);
-        const data = result.data;
-        setListing(data);
-        setTitle(data.title);
-        setDescription(data.description ?? "");
-        setAddress(data.address ?? "");
-        setLocation(data.location ?? "");
-        setCapacity(data.capacity != null ? String(data.capacity) : "");
-        setPricePerHour(data.pricePerHour ?? "");
-        setCurrency(data.currency);
-        setSelectedEventTypes(
-          data.eventTypes?.map((e) => e.name) ?? []
-        );
-        setSelectedAmenities(
-          data.amenities?.map((a) => a.name) ?? []
-        );
-        setHalalVerified(data.halalCertified);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load listing"
-        );
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, [listingId]);
+    if (!detail) return;
+    setListing(detail);
+    setTitle(detail.title);
+    setDescription(detail.description ?? "");
+    setAddress(detail.address ?? "");
+    setLocation(detail.location ?? "");
+    setCapacity(detail.capacity != null ? String(detail.capacity) : "");
+    setPricePerHour(detail.pricePerHour ?? "");
+    setCurrency(detail.currency);
+    setSelectedEventTypes(detail.eventTypes?.map((e) => e.name) ?? []);
+    setSelectedAmenities(detail.amenities?.map((a) => a.name) ?? []);
+    setHalalVerified(detail.halalCertified);
+  }, [detail]);
+
+  const error = loadError ? loadError.message : null;
 
   const toggleEventType = (type: string) => {
     setSelectedEventTypes((prev) =>
@@ -93,14 +83,41 @@ export default function EditVenuePage() {
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSaveError(null);
     setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
+    try {
+      const body: Record<string, unknown> = {
+        title,
+        description: description || undefined,
+        location: location || undefined,
+        address: address || undefined,
+        capacity: capacity ? Number(capacity) : undefined,
+        pricePerHour: pricePerHour ? Number(pricePerHour) : undefined,
+        currency,
+        halalCertified: halalVerified,
+        amenities: selectedAmenities,
+        eventTypes: selectedEventTypes,
+      };
+      const res = await fetch(`/api/v1/listings/${listingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        const detail = err?.error?.details?.[0]?.message;
+        setSaveError(detail || err?.error?.message || "Could not save listing.");
+        return;
+      }
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    }, 1000);
+    } catch {
+      setSaveError("Network error. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) {

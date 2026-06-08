@@ -3,7 +3,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { getListings, getFavorites } from "@/lib/api";
+import { useListings } from "@/hooks/use-listings";
+import { useFavorites } from "@/hooks/use-favorites";
+import { useAuth } from "@/lib/auth";
 import type { ApiListing } from "@/lib/api";
 import StickyNav from "@/components/StickyNav";
 import Footer from "@/components/Footer";
@@ -39,54 +41,52 @@ function apiListingToVenue(api: ApiListing): Venue {
 }
 
 export default function ComparePage() {
-  const [allVenues, setAllVenues] = useState<Venue[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const searchRef = useRef<HTMLDivElement>(null);
+  const [didSeed, setDidSeed] = useState(false);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      let favIds: string[] = [];
+  const {
+    data: listingsRes,
+    isLoading: listingsLoading,
+    error: listingsError,
+    refetch: refetchListings,
+  } = useListings({ limit: 50 });
+  const { data: favRows = [] } = useFavorites({ enabled: Boolean(user) });
 
-      try {
-        const stored = localStorage.getItem("ev_mock_favorites");
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.every((v: unknown) => typeof v === "string")) {
-            favIds = parsed;
-          }
-        }
-      } catch {}
+  const allVenues: Venue[] = (listingsRes?.data ?? []).map(apiListingToVenue);
+  const loading = listingsLoading;
+  const error = listingsError ? listingsError.message : null;
 
-      if (favIds.length === 0) {
-        try {
-          const favRes = await getFavorites();
-          favIds = favRes.data.map((f) => f.id);
-        } catch {}
-      }
-
-      const listingsRes = await getListings({ limit: "50" });
-      const venues = listingsRes.data.map(apiListingToVenue);
-      setAllVenues(venues);
-
-      const existingIds = venues.map((v) => v.id);
-      const validFavIds = favIds.filter((id) => existingIds.includes(id));
-      setSelectedIds(validFavIds.slice(0, 3));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load venues");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  // Seed the comparison slots once: prefer the locally-stored mock list,
+  // then fall back to the user's server-side favorites. Only runs once
+  // per page load — after that selection is user-driven.
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (didSeed || allVenues.length === 0) return;
+    let favIds: string[] = [];
+    try {
+      const stored = localStorage.getItem("ev_mock_favorites");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.every((v: unknown) => typeof v === "string")) {
+          favIds = parsed;
+        }
+      }
+    } catch {}
+    if (favIds.length === 0 && favRows.length > 0) {
+      favIds = favRows.map((f: ApiListing) => f.id);
+    }
+    const existingIds = new Set(allVenues.map((v) => v.id));
+    const validFavIds = favIds.filter((id) => existingIds.has(id));
+    setSelectedIds(validFavIds.slice(0, 3));
+    setDidSeed(true);
+  }, [allVenues, favRows, didSeed]);
+
+  const loadData = useCallback(() => {
+    refetchListings();
+  }, [refetchListings]);
 
   const selectedVenues = selectedIds
     .map((id) => allVenues.find((v) => v.id === id))

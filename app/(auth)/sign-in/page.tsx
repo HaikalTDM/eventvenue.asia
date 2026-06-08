@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/auth/provider";
 
 const GOOGLE_OAUTH_ENABLED = process.env.NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED === "true";
 
@@ -13,7 +13,7 @@ export default function SignInPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const { signIn } = useAuth();
+  const { signInWithPassword, refresh } = useAuth();
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -21,23 +21,19 @@ export default function SignInPage() {
     setLoading(true);
     setNotice(null);
     try {
-      const res = await fetch("/api/v1/auth/sign-in", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        setNotice(data?.error?.message || "Invalid email or password.");
+      const result = await signInWithPassword(email, password);
+      if (!result.ok) {
+        setNotice(result.error || "Invalid email or password.");
         setLoading(false);
         return;
       }
-      const data = await res.json();
-      const role = data?.user?.role;
-      // Update the AuthProvider in-memory state so the rest of the app
-      // sees the user immediately. signIn() also makes a duplicate POST,
-      // but it's idempotent and harmless.
-      await signIn(email, password);
+
+      // `signInWithPassword` already calls `refresh()` internally, so the
+      // hydrated profile is available via the auth provider as soon as it
+      // resolves. Read role directly from the joined session payload to
+      // pick the right landing page — no extra round-trip.
+      const role = result.user?.role;
+
       if (role === "admin") {
         router.push("/admin/dashboard");
       } else if (role === "vendor") {
@@ -53,12 +49,17 @@ export default function SignInPage() {
     }
   };
 
-  const handleGoogle = () => {
-    if (GOOGLE_OAUTH_ENABLED) {
-      window.location.href = "/api/v1/auth/google/start";
+  const handleGoogle = async () => {
+    if (!GOOGLE_OAUTH_ENABLED) {
+      setNotice("Google sign-in is not yet available. Please use email.");
       return;
     }
-    setNotice("Google sign-in is not yet available. Please use email.");
+    const supabase = (await import("@/lib/auth/client")).getSupabaseBrowserClient();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
+    if (error) setNotice(error.message);
   };
 
   return (

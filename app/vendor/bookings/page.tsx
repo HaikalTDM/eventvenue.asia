@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useVendorAuth } from "@/lib/vendor-auth";
-import { getVendorBookings } from "@/lib/api";
+import { useVendorBookings } from "@/hooks/use-bookings";
 import VendorPortalLayout from "@/components/VendorPortalLayout";
 
 const vendorBookingStatusLabels: Record<string, { label: string; color: string }> = {
@@ -18,22 +17,8 @@ const statusOrder = ["confirmed", "in_progress", "pending", "completed", "cancel
 
 export default function VendorBookingsPage() {
   const { vendor } = useVendorAuth();
-  const [bookings, setBookings] = useState<Array<Record<string, unknown>>>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!vendor) return;
-    getVendorBookings()
-      .then((res) => {
-        setBookings((res.data || []) as Array<Record<string, unknown>>);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message || "Failed to load bookings");
-        setLoading(false);
-      });
-  }, [vendor]);
+  const { data: bookings = [], isLoading: loading, error, refetch } =
+    useVendorBookings({ enabled: Boolean(vendor) });
 
   if (!vendor) return null;
 
@@ -54,8 +39,8 @@ export default function VendorBookingsPage() {
     return (
       <VendorPortalLayout>
         <div className="flex flex-col items-center justify-center py-20 text-center">
-          <p className="text-red-600">{error}</p>
-          <button onClick={() => window.location.reload()} className="mt-4 rounded-xl bg-[#EB4D4B] px-5 py-2.5 text-sm font-bold text-white">
+          <p className="text-red-600">{error.message}</p>
+          <button onClick={() => refetch()} className="mt-4 rounded-xl bg-[#EB4D4B] px-5 py-2.5 text-sm font-bold text-white">
             Retry
           </button>
         </div>
@@ -83,7 +68,7 @@ export default function VendorBookingsPage() {
       ) : (
         <div className="mt-6 space-y-4">
           {statusOrder.map((status) => {
-            const filtered = bookings.filter((b) => (b as Record<string, string>).status === status);
+            const filtered = bookings.filter((b) => b.status === status);
             if (filtered.length === 0) return null;
             const label = vendorBookingStatusLabels[status] || { label: status, color: "bg-gray-100 text-gray-600" };
             return (

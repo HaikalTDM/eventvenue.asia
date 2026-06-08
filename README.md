@@ -23,7 +23,7 @@ The application supports both a **mock mode** (localStorage-only, ideal for demo
 ### For Customers
 - **Smart Search** — filter venues by location, capacity, amenities, event type, halal certification, and price range.
 - **AI Smart Planner** — describe your event in natural language and receive scored venue and service recommendations with budget analysis.
-- **Inquiry Pipeline** — submit inquiries, track status (`pending → accepted → approved → proceed → ongoing → completed`), and book events with confirmed vendors.
+- **Inquiry Pipeline** — submit inquiries, track status (`pending → accepted → completed | cancelled`), and book events with confirmed vendors.
 - **Wishlist & Compare** — save favorite venues and compare side-by-side.
 - **Reviews & Ratings** — rate completed bookings and read verified guest reviews.
 

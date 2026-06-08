@@ -18,6 +18,10 @@ const nextConfig = {
         protocol: "https",
         hostname: "cdn.eventvenue.asia",
       },
+      {
+        protocol: "https",
+        hostname: "*.supabase.co",
+      },
     ],
   },
   async headers() {

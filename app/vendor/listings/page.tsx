@@ -1,70 +1,59 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { getVendorProfile, getListings, type ApiListing } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { useVendorAuth } from "@/lib/vendor-auth";
+import { useListings, listingKeys } from "@/hooks/use-listings";
+import { updateListingStatusAction, deleteListingAction } from "@/lib/actions/listing";
 import VendorPortalLayout from "@/components/VendorPortalLayout";
 
 export default function VendorListingsPage() {
-  const [listings, setListings] = useState<ApiListing[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [vendorType, setVendorType] = useState<"venue_owner" | "service_provider" | null>(null);
+  const { vendor } = useVendorAuth();
+  const qc = useQueryClient();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const profile = (await getVendorProfile()) as {
-          data?: { listingType?: string; vendorType?: string };
-        };
-        const raw =
-          profile?.data?.vendorType || profile?.data?.listingType || "venue_owner";
-        const normalizedType: "venue_owner" | "service_provider" =
-          raw === "service" || raw === "service_provider"
-            ? "service_provider"
-            : "venue_owner";
-        setVendorType(normalizedType);
-        // Use ?mine=true so we get this vendor's listings regardless of
-        // status (draft, paused, active). The public listings filter
-        // status=active which would hide brand-new draft listings.
-        const result = await getListings({
-          mine: "true",
-          listingType: normalizedType === "venue_owner" ? "venue" : "service",
-        });
-        setListings(result.data);
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load listings"
-        );
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
+  // Vendor type is already on the session (joined into SessionUser by the
+  // server's getSessionUser). Avoids the redundant /vendors/me round-trip
+  // the legacy implementation needed to learn the listing type.
+  const vendorType: "venue_owner" | "service_provider" =
+    vendor?.vendorType === "service_provider" ? "service_provider" : "venue_owner";
+  const isVenue = vendorType === "venue_owner";
+  const displayType = isVenue ? "Venue" : "Service";
 
-  const setListingStatus = async (id: string, newStatus: "active" | "paused" | "draft") => {
+  const {
+    data: response,
+    isLoading: loading,
+    error,
+  } = useListings(
+    { mine: true, type: isVenue ? "venue" : "service" },
+    { enabled: Boolean(vendor) }
+  );
+
+  const listings = response?.data ?? [];
+
+  const setListingStatus = async (
+    id: string,
+    newStatus: "active" | "paused" | "draft"
+  ) => {
     setBusyId(id);
     setActionError(null);
     try {
-      const res = await fetch(`/api/v1/listings/${id}/status`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+      const result = await updateListingStatusAction({
+        listingId: id,
+        status: newStatus,
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        setActionError(err?.error?.message || "Could not update listing.");
+      if (!result.ok) {
+        setActionError(result.error || "Could not update listing.");
         return;
       }
-      setListings((prev) =>
-        prev.map((l) => (l.id === id ? { ...l, status: newStatus } : l))
-      );
+      // Invalidate the vendor's listings cache so the new status reflects
+      // here and on the dashboard's "Active Listings" stat.
+      await qc.invalidateQueries({ queryKey: listingKeys.all });
     } catch {
       setActionError("Network error. Please try again.");
     } finally {
@@ -72,8 +61,30 @@ export default function VendorListingsPage() {
     }
   };
 
-  const isVenue = vendorType === "venue_owner";
-  const displayType = isVenue ? "Venue" : "Service";
+  const handleDelete = async (id: string, title: string) => {
+    setDeleteTarget({ id, title });
+  };
+
+  const executeDelete = async () => {
+    if (!deleteTarget) return;
+    const { id } = deleteTarget;
+    setBusyId(id);
+    setActionError(null);
+    try {
+      const result = await deleteListingAction({ listingId: id });
+      if (!result.ok) {
+        setActionError(result.error || "Could not delete listing.");
+        setDeleteTarget(null);
+        return;
+      }
+      setDeleteTarget(null);
+      await qc.invalidateQueries({ queryKey: listingKeys.all });
+    } catch {
+      setActionError("Network error. Please try again.");
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   return (
     <VendorPortalLayout>
@@ -115,13 +126,19 @@ export default function VendorListingsPage() {
         </Link>
       </div>
 
+      {actionError && (
+        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+          {actionError}
+        </div>
+      )}
+
       {loading ? (
         <div className="mt-12 flex items-center justify-center py-16">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-[#EB4D4B]" />
         </div>
       ) : error ? (
         <div className="mt-12 rounded-2xl border border-red-200 bg-red-50 py-16 text-center">
-          <p className="font-medium text-red-600">{error}</p>
+          <p className="font-medium text-red-600">{error.message}</p>
         </div>
       ) : listings.length === 0 ? (
         <div className="mt-12 rounded-2xl border border-dashed border-gray-300 bg-white py-16 text-center">
@@ -289,12 +306,65 @@ export default function VendorListingsPage() {
                           {isBusy ? "..." : isPaused ? "Unpause" : "Pause"}
                         </button>
                       )}
+                      <button
+                        onClick={() => handleDelete(id, title)}
+                        disabled={isBusy}
+                        className="ml-auto rounded-xl border border-red-200 px-4 py-2 text-sm font-medium text-red-500 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        {isBusy ? "..." : "Delete"}
+                      </button>
                     </div>
                   </div>
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600">
+              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </div>
+            <h2 className="text-center text-lg font-bold text-gray-900">Delete listing?</h2>
+            <p className="mt-2 text-center text-sm text-gray-500">
+              This will permanently remove <span className="font-semibold text-gray-700">&ldquo;{deleteTarget.title}&rdquo;</span>{" "}
+              and all its photos, availability data, and bookings. This cannot be undone.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={busyId === deleteTarget.id}
+                className="flex-1 rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={executeDelete}
+                disabled={busyId === deleteTarget.id}
+                className="flex-1 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-red-600/25 transition-all hover:bg-red-700 disabled:opacity-60"
+              >
+                {busyId === deleteTarget.id ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Deleting...
+                  </span>
+                ) : (
+                  "Delete"
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </VendorPortalLayout>

@@ -204,7 +204,9 @@ async function mockOnlyReset(opts: Options): Promise<void> {
   for (const q of queries) {
     try {
       const result = await db.execute(q.sql);
-      console.log(`  ✓ ${q.label}: ${result.rowCount ?? "?"} rows deleted`);
+      // postgres-js returns a RowList (array-like) instead of pg's { rowCount }.
+      const count = (result as unknown as { length?: number }).length ?? "?";
+      console.log(`  ✓ ${q.label}: ${count} rows deleted`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`  ✗ ${q.label}: ${message}`);

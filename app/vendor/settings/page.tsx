@@ -1,24 +1,40 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useVendorAuth } from "@/lib/vendor-auth";
+import { useAuth } from "@/lib/auth/provider";
+import { getSupabaseBrowserClient } from "@/lib/auth/client";
+import { updateVendorProfileAction } from "@/lib/actions/vendor-profile";
 import VendorPortalLayout from "@/components/VendorPortalLayout";
 
 export default function VendorSettingsPage() {
   const { vendor } = useVendorAuth();
+  const { refresh } = useAuth();
 
   const [activeTab, setActiveTab] = useState<"profile" | "password" | "notifications">("profile");
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
-  // Profile fields
-  const [businessName, setBusinessName] = useState(vendor?.vendorName ?? "");
-  const [name, setName] = useState(vendor?.name ?? "");
-  const [email, setEmail] = useState(vendor?.email ?? "");
-  const [phone, setPhone] = useState(vendor?.phone ?? "");
+  const [businessName, setBusinessName] = useState("");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [bio, setBio] = useState("");
   const [website, setWebsite] = useState("");
   const [location, setLocation] = useState("");
+
+  useEffect(() => {
+    if (vendor) {
+      setBusinessName(vendor.vendorName ?? "");
+      setName(vendor.name ?? "");
+      setEmail(vendor.email ?? "");
+      setPhone(vendor.phone ?? "");
+      setBio(vendor.businessDescription ?? "");
+      setWebsite(vendor.businessWebsite ?? "");
+      setLocation(vendor.businessLocation ?? "");
+    }
+  }, [vendor]);
 
   // Password fields
   const [currentPassword, setCurrentPassword] = useState("");
@@ -45,17 +61,46 @@ export default function VendorSettingsPage() {
 
   if (!vendor) return null;
 
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    setProfileError(null);
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const [vendorResult, userResult] = await Promise.all([
+        updateVendorProfileAction({
+          businessName: businessName || undefined,
+          businessDescription: bio.trim() === "" ? null : bio,
+          businessWebsite: website.trim() === "" ? null : website,
+          businessLocation: location.trim() === "" ? null : location,
+        }),
+        fetch("/api/v1/users/me", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: name.trim() || undefined,
+            phone: phone.trim() || null,
+          }),
+        }).then((r) => r.json()),
+      ]);
+      if (!vendorResult.ok) {
+        setProfileError(vendorResult.error || "Could not save profile.");
+        return;
+      }
+      if ((userResult as { error?: string }).error) {
+        setProfileError((userResult as { message?: string }).message || "Could not save account info.");
+        return;
+      }
       setSaved(true);
+      void refresh();
       setTimeout(() => setSaved(false), 3000);
-    }, 800);
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleChangePassword = (e: React.FormEvent) => {
+  const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError("");
     setPasswordSuccess(false);
@@ -70,23 +115,50 @@ export default function VendorSettingsPage() {
     }
 
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      // Re-authenticate with the current password before allowing the
+      // change. Supabase's updateUser requires an active session, but does
+      // not re-verify the existing credential — without this check, a
+      // hijacked browser tab could rotate the password silently.
+      const supabase = getSupabaseBrowserClient();
+      if (vendor?.email) {
+        const { error: reauthError } = await supabase.auth.signInWithPassword({
+          email: vendor.email,
+          password: currentPassword,
+        });
+        if (reauthError) {
+          setPasswordError("Current password is incorrect.");
+          return;
+        }
+      }
+
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        setPasswordError(error.message || "Could not update password.");
+        return;
+      }
+
       setPasswordSuccess(true);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
       setTimeout(() => setPasswordSuccess(false), 3000);
-    }, 800);
+    } catch (err) {
+      setPasswordError(err instanceof Error ? err.message : "Network error.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSaveNotifications = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
-    }, 800);
+    // Notification preferences aren't persisted yet — there's no
+    // notification_preferences table or endpoint. The toggle state stays
+    // local to the component for the current session. Once the backend
+    // lands, swap this for a real PATCH to /api/v1/users/me or a dedicated
+    // /api/v1/users/me/notifications endpoint.
+    setPasswordError("");
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
   };
 
   const tabs = [
@@ -184,7 +256,8 @@ export default function VendorSettingsPage() {
               </div>
               <div>
                 <label htmlFor="settingsEmail" className="mb-1.5 block text-sm font-medium text-gray-700">Email</label>
-                <input id="settingsEmail" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 outline-none transition focus:border-[#EB4D4B] focus:ring-2 focus:ring-[#EB4D4B]/20" />
+                <input id="settingsEmail" type="email" readOnly value={email} className="w-full rounded-xl border border-gray-200 bg-gray-100 px-4 py-3 text-sm text-gray-500 outline-none cursor-not-allowed" />
+                <p className="mt-1 text-xs text-gray-400">Email changes require verification via account settings</p>
               </div>
               <div>
                 <label htmlFor="settingsPhone" className="mb-1.5 block text-sm font-medium text-gray-700">Phone</label>
@@ -205,6 +278,7 @@ export default function VendorSettingsPage() {
               {loading ? (<><div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />Saving...</>) : "Save Changes"}
             </button>
           </div>
+          {profileError && <p className="text-sm text-red-500">{profileError}</p>}
         </form>
       )}
 

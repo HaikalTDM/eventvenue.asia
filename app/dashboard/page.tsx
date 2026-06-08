@@ -1,18 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { getMyInquiries, getFavorites } from "@/lib/api";
+import { useMyInquiries } from "@/hooks/use-inquiries";
+import { useFavorites } from "@/hooks/use-favorites";
 import type { ApiInquiry } from "@/lib/api";
 import type { InquiryStatus, Inquiry } from "@/lib/types";
 
 const statusLabels: Record<InquiryStatus, { label: string; color: string }> = {
-  accept: { label: "Accept", color: "bg-blue-100 text-blue-700" },
-  approve: { label: "Approve", color: "bg-indigo-100 text-indigo-700" },
-  proceed: { label: "Proceed", color: "bg-amber-100 text-amber-700" },
-  ongoing: { label: "Ongoing", color: "bg-orange-100 text-orange-700" },
-  completed: { label: "Complete", color: "bg-green-100 text-green-700" },
+  pending: { label: "Pending", color: "bg-yellow-100 text-yellow-700" },
+  accepted: { label: "Accepted", color: "bg-blue-100 text-blue-700" },
+  completed: { label: "Completed", color: "bg-emerald-100 text-emerald-700" },
   cancelled: { label: "Cancelled", color: "bg-red-100 text-red-700" },
 };
 
@@ -38,37 +37,35 @@ function apiToInquiry(api: ApiInquiry): Inquiry {
 }
 
 export default function DashboardPage() {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
-  const [favoriteCount, setFavoriteCount] = useState(0);
+  const {
+    data: rawInquiries = [],
+    isLoading: inquiriesLoading,
+    error: inquiriesError,
+    refetch: refetchInquiries,
+  } = useMyInquiries();
+  const {
+    data: favoriteRows = [],
+    isLoading: favoritesLoading,
+    error: favoritesError,
+    refetch: refetchFavorites,
+  } = useFavorites();
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [inqRes, favRes] = await Promise.all([
-        getMyInquiries(),
-        getFavorites(),
-      ]);
-      setInquiries(inqRes.data.map(apiToInquiry));
-      setFavoriteCount(favRes.data.length);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load data");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const inquiries = useMemo<Inquiry[]>(
+    () => rawInquiries.map(apiToInquiry),
+    [rawInquiries]
+  );
+  const favoriteCount = favoriteRows.length;
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const loading = inquiriesLoading || favoritesLoading;
+  const error = inquiriesError ?? favoritesError ?? null;
+  const fetchData = () => {
+    void refetchInquiries();
+    void refetchFavorites();
+  };
 
   const inquiryCounts = {
     total: inquiries.length,
-    accept: inquiries.filter((i) => i.status === "accept").length,
-    proceed: inquiries.filter((i) => i.status === "proceed").length,
-    ongoing: inquiries.filter((i) => i.status === "ongoing").length,
+    accepted: inquiries.filter((i) => i.status === "pending" || i.status === "accepted").length,
     completed: inquiries.filter((i) => i.status === "completed").length,
     cancelled: inquiries.filter((i) => i.status === "cancelled").length,
   };
@@ -85,7 +82,7 @@ export default function DashboardPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
           </svg>
           <h3 className="mt-3 text-sm font-semibold text-red-700">Failed to load dashboard</h3>
-          <p className="mt-1 text-xs text-red-500">{error}</p>
+          <p className="mt-1 text-xs text-red-500">{error.message}</p>
           <button
             onClick={fetchData}
             className="mt-4 rounded-xl bg-red-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
@@ -151,7 +148,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-5">
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm font-medium text-gray-500">Total Inquiries</p>
           <p className="mt-1 text-3xl font-bold text-gray-900">{inquiryCounts.total}</p>
@@ -163,18 +160,28 @@ export default function DashboardPage() {
           </Link>
         </div>
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-gray-500">In Progress</p>
-          <p className="mt-1 text-3xl font-bold text-orange-600">{inquiryCounts.ongoing}</p>
+          <p className="text-sm font-medium text-gray-500">Pending</p>
+          <p className="mt-1 text-3xl font-bold text-yellow-600">{inquiries.filter((i) => i.status === "pending").length}</p>
           <Link
             href="/dashboard/inquiries"
             className="mt-2 inline-flex text-xs font-semibold text-[#EB4D4B] hover:underline"
           >
-            View active
+            View pending
+          </Link>
+        </div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <p className="text-sm font-medium text-gray-500">Accepted</p>
+          <p className="mt-1 text-3xl font-bold text-blue-600">{inquiries.filter((i) => i.status === "accepted").length}</p>
+          <Link
+            href="/dashboard/inquiries"
+            className="mt-2 inline-flex text-xs font-semibold text-[#EB4D4B] hover:underline"
+          >
+            View accepted
           </Link>
         </div>
         <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
           <p className="text-sm font-medium text-gray-500">Completed</p>
-          <p className="mt-1 text-3xl font-bold text-green-600">{inquiryCounts.completed}</p>
+          <p className="mt-1 text-3xl font-bold text-emerald-600">{inquiryCounts.completed}</p>
           <Link
             href="/dashboard/inquiries"
             className="mt-2 inline-flex text-xs font-semibold text-[#EB4D4B] hover:underline"

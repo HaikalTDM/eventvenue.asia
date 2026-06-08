@@ -1,20 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
 
-interface ApiUser {
-  id: string;
-  name: string;
-  email: string;
-  role: "customer" | "vendor" | "admin";
-  phone: string | null;
-  isVerified: boolean;
-  isSuspended: boolean;
-  isMock: boolean;
-  authProvider: string;
-  createdAt: string;
-  updatedAt: string;
-}
+import {
+  useAdminUsers,
+  useToggleUserSuspension,
+  type ApiAdminUser,
+} from "@/hooks/use-admin";
 
 function formatJoined(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -24,53 +16,22 @@ function formatJoined(iso: string): string {
 }
 
 export default function AdminUsersPage() {
-  const [users, setUsers] = useState<ApiUser[]>([]);
   const [filter, setFilter] = useState<"all" | "customer" | "vendor" | "admin" | "suspended">("all");
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [actionInFlight, setActionInFlight] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/v1/admin/users?limit=100`, { cache: "no-store" });
-      if (!res.ok) {
-        setError("Could not load users.");
-        return;
-      }
-      const json = await res.json();
-      setUsers(json.data as ApiUser[]);
-    } catch {
-      setError("Network error.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data: users = [], isLoading: loading, error } = useAdminUsers({ limit: 100 });
+  const toggleSuspension = useToggleUserSuspension();
+  const errorMessage = error?.message ?? null;
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const toggleSuspend = async (u: ApiUser) => {
-    setActionInFlight(u.id);
-    const action = u.isSuspended ? "reactivate" : "suspend";
-    try {
-      const res = await fetch(`/api/v1/admin/users?userId=${u.id}&action=${action}`, {
-        method: "PUT",
-      });
-      if (!res.ok) {
-        setError(`Could not ${action} user.`);
-        return;
-      }
-      setUsers((prev) =>
-        prev.map((x) => (x.id === u.id ? { ...x, isSuspended: !u.isSuspended } : x))
-      );
-    } finally {
-      setActionInFlight(null);
-    }
+  const toggleSuspend = (u: ApiAdminUser) => {
+    toggleSuspension.mutate({
+      userId: u.id,
+      action: u.isSuspended ? "reactivate" : "suspend",
+    });
   };
+
+  const actionInFlight =
+    toggleSuspension.isPending ? toggleSuspension.variables?.userId ?? null : null;
 
   const filtered = users
     .filter((u) => {
@@ -96,7 +57,7 @@ export default function AdminUsersPage() {
 
       {error && (
         <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          {error}
+          {errorMessage}
         </div>
       )}
 

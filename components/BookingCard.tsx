@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import InquiryFormModal from "@/components/InquiryFormModal";
 import CustomDatePicker from "@/components/CustomDatePicker";
 import CustomTimePicker from "@/components/CustomTimePicker";
+import { useAuth } from "@/lib/auth";
+import { useCreateBooking } from "@/hooks/use-bookings";
 
 interface BookingCardProps {
   pricePerHour: number;
@@ -30,12 +33,43 @@ export default function BookingCard({
   const [guestCount, setGuestCount] = useState(50);
   const [isInquiryOpen, setIsInquiryOpen] = useState(false);
   const [isBookingOpen, setIsBookingOpen] = useState(false);
-  const [bookingLoading, setBookingLoading] = useState(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
+
+  const router = useRouter();
+  const { user } = useAuth();
+  const createBooking = useCreateBooking();
+  const bookingLoading = createBooking.isPending;
 
   const startHour = parseInt(startTime.split(":")[0], 10);
   const endHour = parseInt(endTime.split(":")[0], 10);
   const duration = endHour - startHour || 3;
   const totalPrice = duration * pricePerHour;
+
+  const handleConfirmBooking = async () => {
+    setBookingError(null);
+    if (!user) {
+      router.push("/sign-in");
+      return;
+    }
+    if (!eventDate) {
+      setBookingError("Please pick an event date first.");
+      return;
+    }
+    try {
+      await createBooking.mutateAsync({
+        listingId: venueId,
+        eventDate,
+        startTime,
+        endTime,
+        guestCount,
+        totalAmount: totalPrice,
+      });
+      setIsBookingOpen(false);
+      router.push("/dashboard");
+    } catch (err) {
+      setBookingError(err instanceof Error ? err.message : "Booking failed");
+    }
+  };
 
   return (
     <>
@@ -203,18 +237,15 @@ export default function BookingCard({
                     Cancel
                   </button>
                   <button
-                    onClick={() => {
-                      setBookingLoading(true);
-                      setTimeout(() => {
-                        setBookingLoading(false);
-                        setIsBookingOpen(false);
-                      }, 1500);
-                    }}
+                    onClick={handleConfirmBooking}
                     className="flex-1 rounded-xl bg-[#EB4D4B] px-6 py-3 text-sm font-bold text-white shadow-md shadow-[#EB4D4B]/25 transition-all hover:bg-[#dc2626]"
                   >
                     Confirm
                   </button>
                 </div>
+                {bookingError && (
+                  <p className="mt-3 text-xs text-red-600">{bookingError}</p>
+                )}
               </>
             )}
           </div>

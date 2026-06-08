@@ -1,13 +1,17 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
+
+import { getSupabaseBrowserClient } from "@/lib/auth/client";
 
 function ResetPasswordForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const token = searchParams.get("token") || "";
+  // Supabase password recovery delivers the user via the OAuth-style callback
+  // flow; once `/auth/callback` exchanges the code, the visitor lands here
+  // with an active session. The presence of that session is what gates the
+  // form — there's no other valid entry point.
 
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -15,27 +19,38 @@ function ResetPasswordForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [hasSession, setHasSession] = useState(false);
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    if (!token) setError("This reset link is missing its token.");
-  }, [token]);
+    let active = true;
+    const supabase = getSupabaseBrowserClient();
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      if (data.session) {
+        setHasSession(true);
+      } else {
+        setError("This reset link is invalid or has expired. Request a new one.");
+      }
+      setChecking(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const mismatch = confirm.length > 0 && password !== confirm;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token || mismatch) return;
+    if (mismatch || !hasSession) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, password }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        setError(data?.error?.message || "Could not reset password.");
+      const supabase = getSupabaseBrowserClient();
+      const { error: updateError } = await supabase.auth.updateUser({ password });
+      if (updateError) {
+        setError(updateError.message || "Could not reset password.");
         return;
       }
       setSuccess(true);
@@ -123,7 +138,7 @@ function ResetPasswordForm() {
 
         <button
           type="submit"
-          disabled={loading || !token || mismatch}
+          disabled={loading || !hasSession || mismatch}
           className="w-full rounded-xl bg-[#EB4D4B] px-6 py-3.5 text-sm font-bold text-white shadow-md shadow-[#EB4D4B]/25 transition-all hover:bg-[#dc2626] hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? "Updating..." : "Update password"}

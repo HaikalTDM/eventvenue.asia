@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { getListingDetail, type ApiListingDetail } from "@/lib/api";
+import { useListing } from "@/hooks/use-listings";
+import type { ApiListingDetail } from "@/lib/api";
 import type { VendorAppointment, BlockedDateEntry } from "@/lib/types";
 import VendorPortalLayout from "@/components/VendorPortalLayout";
 
@@ -54,8 +55,13 @@ export default function ManageAvailabilityPage() {
   const [listingTitle, setListingTitle] = useState("");
   const [blockedDates, setBlockedDates] = useState<BlockedDateEntry[]>([]);
   const [appointments, setAppointments] = useState<VendorAppointment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  const {
+    data: detail,
+    isLoading: loading,
+    error: loadError,
+  } = useListing(listingId);
+  const error = loadError ? loadError.message : null;
 
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [saved, setSaved] = useState(false);
@@ -76,34 +82,20 @@ export default function ManageAvailabilityPage() {
   });
 
   useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const result = await getListingDetail(listingId);
-        const data = result.data;
-        setListingTitle(data.title);
-        setBlockedDates(
-          (data.availability?.blockedDates ?? []).map((d) => ({
-            date: d,
-            reason: "",
-          }))
-        );
-        if (data.availability?.appointments?.length) {
-          setAppointments(
-            mapApiAppointments(data.id, data.availability.appointments)
-          );
-        }
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load listing"
-        );
-      } finally {
-        setLoading(false);
-      }
+    if (!detail) return;
+    setListingTitle(detail.title);
+    setBlockedDates(
+      (detail.availability?.blockedDates ?? []).map((d) => ({
+        date: d,
+        reason: "",
+      }))
+    );
+    if (detail.availability?.appointments?.length) {
+      setAppointments(
+        mapApiAppointments(detail.id, detail.availability.appointments)
+      );
     }
-    load();
-  }, [listingId]);
+  }, [detail]);
 
   if (loading) {
     return (

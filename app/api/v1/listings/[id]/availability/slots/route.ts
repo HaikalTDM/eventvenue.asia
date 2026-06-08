@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { requireRole } from "@/lib/auth/server";
 import { handleApiError, notFound } from "@/lib/utils/errors";
 import { eq } from "drizzle-orm";
 
@@ -10,10 +10,9 @@ export async function POST(
 ) {
   try {
     const { id: listingId } = await params;
-    const { user } = await authenticate(request);
-    if (!user || user.role !== "vendor") {
-      return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
-    }
+    const userOrResp = await requireRole("vendor");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const listing = await db.query.listings.findFirst({
       where: (l) => eq(l.id, listingId),

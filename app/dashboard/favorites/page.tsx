@@ -1,16 +1,84 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useFavorites } from "@/lib/favorites";
-import VenueCard from "@/components/VenueCard";
+import { useFavorites, useToggleFavorite } from "@/hooks/use-favorites";
+import type { Venue } from "@/lib/types";
+
+function favoriteToVenue(row: {
+  id: string;
+  title: string;
+  slug: string;
+  location: string | null;
+  capacity: number | null;
+  pricePerHour: string | null;
+  currency: string;
+  halalCertified: boolean;
+  averageRating: string;
+  reviewCount: number;
+  primaryPhoto?: { url: string; altText: string | null } | null;
+  amenities?: string[];
+  eventTypes?: string[];
+}): Venue {
+  return {
+    id: row.id,
+    title: row.title,
+    slug: row.slug,
+    location: row.location ?? "",
+    pricePerHour: row.pricePerHour ? Number(row.pricePerHour) : 0,
+    currency: row.currency,
+    capacity: row.capacity ?? 0,
+    rating: Number(row.averageRating) || 0,
+    reviewCount: row.reviewCount,
+    halalVerified: row.halalCertified,
+    thumbnailUrl: row.primaryPhoto?.url ?? "",
+    galleryUrls: row.primaryPhoto ? [row.primaryPhoto.url] : [],
+    eventTypes: row.eventTypes ?? [],
+    amenities: row.amenities ?? [],
+    description: "",
+    hostName: "",
+    hostResponseRate: 0,
+    hostResponseTime: "",
+    reviews: [],
+    faqs: [],
+    coordinates: { lat: 0, lng: 0 },
+    address: "",
+    blockedDates: [],
+  };
+}
 
 export default function FavoritesPage() {
-  const { favorites, favoriteIds, toggleFavorite } = useFavorites();
+  const { data: rows = [], isLoading } = useFavorites();
+  const toggle = useToggleFavorite();
+
+  const favorites = useMemo<Venue[]>(
+    () => (rows as Parameters<typeof favoriteToVenue>[0][]).map(favoriteToVenue),
+    [rows]
+  );
 
   const handleRemove = (venueId: string) => {
-    toggleFavorite(venueId);
+    toggle.mutate({ listingId: venueId, currentlyFavorited: true });
   };
+
+  if (isLoading) {
+    return (
+      <div>
+        <div className="animate-pulse">
+          <div className="h-8 w-40 rounded-lg bg-gray-200" />
+          <div className="mt-2 h-4 w-64 rounded-lg bg-gray-200" />
+          <div className="mt-8 space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="h-44 rounded-2xl border border-gray-200 bg-white"
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

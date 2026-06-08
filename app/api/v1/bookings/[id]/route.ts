@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { requireUser, requireRole } from "@/lib/auth/server";
 import { bookingServiceSchema, bookingStatusSchema } from "@/lib/validators/booking.schema";
 import { handleApiError, notFound, validationError } from "@/lib/utils/errors";
 import { eq } from "drizzle-orm";
@@ -11,10 +11,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireUser();
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const booking = await db.query.bookings.findFirst({
       where: (b) => eq(b.id, id),
@@ -24,7 +23,7 @@ export async function GET(
     const listing = await db.query.listings.findFirst({
       where: (l) => eq(l.id, booking.listingId),
     });
-    const isCustomer = booking.customerId === user.sub;
+    const isCustomer = booking.customerId === user.id;
     const isVendorOwner = listing?.vendorId === user.vendorId;
     const isAdmin = user.role === "admin";
 
@@ -44,16 +43,15 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireRole("customer");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const booking = await db.query.bookings.findFirst({
       where: (b) => eq(b.id, id),
     });
     if (!booking) throw notFound("Booking");
-    if (booking.customerId !== user.sub) {
+    if (booking.customerId !== user.id) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
     }
 
@@ -88,10 +86,9 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    const { user } = await authenticate(request);
-    if (!user || user.role !== "vendor") {
-      return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
-    }
+    const userOrResp = await requireRole("vendor");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const booking = await db.query.bookings.findFirst({
       where: (b) => eq(b.id, id),

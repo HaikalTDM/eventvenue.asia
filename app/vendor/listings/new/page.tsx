@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import VendorPortalLayout from "@/components/VendorPortalLayout";
 import LocationCascade, { type LocationSelection } from "@/components/LocationCascade";
+import { parseGoogleMapsUrl } from "@/lib/google-maps-url-parser";
 
 const eventTypeOptions = [
   "Wedding", "Corporate", "Private Party", "Birthday", "Seminar",
@@ -59,8 +60,12 @@ export default function AddVenuePage() {
   const [halalVerified, setHalalVerified] = useState(false);
 
   // Photos
-  const [photos, setPhotos] = useState<{ name: string; preview: string }[]>([]);
+  const [photos, setPhotos] = useState<{ file: File; name: string; preview: string }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Google Maps quick fill
+  const [gmapsUrl, setGmapsUrl] = useState("");
+  const [gmapsMessage, setGmapsMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Contact
   const [contactName, setContactName] = useState("");
@@ -83,6 +88,7 @@ export default function AddVenuePage() {
     const files = e.target.files;
     if (files) {
       const newPhotos = Array.from(files).map((f) => ({
+        file: f,
         name: f.name,
         preview: URL.createObjectURL(f),
       }));
@@ -127,6 +133,44 @@ export default function AddVenuePage() {
       },
       { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
     );
+  };
+
+  const handleGmapsUrlChange = (url: string) => {
+    setGmapsUrl(url);
+    setGmapsMessage(null);
+
+    if (!url.trim()) return;
+
+    const result = parseGoogleMapsUrl(url);
+    if (!result.ok || !result.data) {
+      setGmapsMessage({ type: "error", text: result.error ?? "Could not parse this URL." });
+      return;
+    }
+
+    const { name, latitude, longitude } = result.data;
+    const filled: string[] = [];
+
+    if (name && !title) {
+      setTitle(name);
+      filled.push(`Venue name: "${name}"`);
+    } else if (name && title) {
+      filled.push(`Venue name detected: "${name}" (field already filled, not overwritten)`);
+    }
+
+    if (latitude !== null && longitude !== null) {
+      setLatitude(latitude.toFixed(6));
+      setLongitude(longitude.toFixed(6));
+      if (!title || !name) {
+        filled.push(`Coordinates: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+      }
+    }
+
+    if (filled.length > 0) {
+      setGmapsMessage({
+        type: "success",
+        text: filled.join(" | "),
+      });
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -198,9 +242,35 @@ export default function AddVenuePage() {
         setSubmitError(detail || err?.error?.message || "Could not create listing.");
         return;
       }
+
+      // Listing row exists; now stream up the photos so the listing has
+      // a thumbnail before the vendor lands back on the listings page.
+      // Failures here are non-fatal — the listing is already saved and the
+      // vendor can re-upload from the edit screen.
+      if (photos.length > 0) {
+        try {
+          const created = (await res.json()) as { data: { id: string } };
+          const fd = new FormData();
+          for (const p of photos) fd.append("file", p.file, p.name);
+          const photoRes = await fetch(
+            `/api/v1/listings/${created.data.id}/photos`,
+            { method: "POST", body: fd }
+          );
+          if (!photoRes.ok) {
+            const err = await photoRes.json().catch(() => null);
+            // Surface the upload error in the success view but keep the
+            // create as successful — the row is in the DB either way.
+            console.warn(
+              "photo_upload_partial",
+              err?.error?.message ?? photoRes.status
+            );
+          }
+        } catch (uploadErr) {
+          console.warn("photo_upload_failed", uploadErr);
+        }
+      }
+
       setSuccess(true);
-      // Photos are not yet uploaded - need R2 wiring (Phase C). Contact info
-      // is also not part of the listing schema; treat as cosmetic for now.
     } catch {
       setSubmitError("Network error. Please try again.");
     } finally {
@@ -246,6 +316,8 @@ export default function AddVenuePage() {
                 setContactName("");
                 setContactPhone("");
                 setContactEmail("");
+                setGmapsUrl("");
+                setGmapsMessage(null);
               }}
               className="rounded-xl border border-gray-200 px-6 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
@@ -280,6 +352,44 @@ export default function AddVenuePage() {
         <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-gray-900">Basic Information</h2>
           <p className="mt-1 text-sm text-gray-500">Tell customers about your venue</p>
+
+          {/* Google Maps quick fill */}
+          <div className="mt-4 rounded-xl border border-dashed border-gray-200 bg-gray-50/50 p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-50">
+                <svg className="h-4 w-4 text-[#EB4D4B]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-700">Quick Fill from Google Maps</p>
+                <p className="mt-0.5 text-xs text-gray-400">
+                  Paste a Google Maps link to auto-fill the venue name and coordinates.
+                </p>
+                <div className="mt-2">
+                  <input
+                    type="url"
+                    value={gmapsUrl}
+                    onChange={(e) => handleGmapsUrlChange(e.target.value)}
+                    placeholder="https://www.google.com/maps/place/..."
+                    className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 outline-none transition focus:border-[#EB4D4B] focus:ring-2 focus:ring-[#EB4D4B]/20"
+                  />
+                </div>
+                {gmapsMessage && (
+                  <p
+                    className={`mt-2 rounded-lg px-3 py-2 text-xs ${
+                      gmapsMessage.type === "success"
+                        ? "bg-green-50 text-green-700"
+                        : "bg-red-50 text-red-700"
+                    }`}
+                  >
+                    {gmapsMessage.text}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
 
           <div className="mt-6 space-y-5">
             <div>

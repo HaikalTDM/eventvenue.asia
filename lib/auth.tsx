@@ -1,9 +1,29 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
-import { useDataMode } from "@/lib/data-mode";
+/**
+ * COMPATIBILITY SHIM — Phase 2 → Phase 3 transition.
+ *
+ * The legacy `useAuth()` hook and `<AuthProvider>` are imported from this path
+ * by ~10 components. Phase 2 introduces a new Supabase-backed provider at
+ * `lib/auth/provider.tsx`, but rewriting every consumer is Phase 3 work.
+ *
+ * This file re-exports the new provider with the legacy method shape
+ * (`signIn`, `signUp`, `signOut`, `updateProfile`) so existing components
+ * compile and behave correctly without changes. Phase 3 deletes this file
+ * once every import is migrated to `@/lib/auth/provider`.
+ */
 
-type User = {
+import { useCallback, useMemo } from "react";
+
+import {
+  AuthProvider as NewAuthProvider,
+  useAuth as useNewAuth,
+} from "@/lib/auth/provider";
+import { getSupabaseBrowserClient } from "@/lib/auth/client";
+
+export const AuthProvider = NewAuthProvider;
+
+type LegacyUser = {
   id: string;
   name: string;
   email: string;
@@ -17,159 +37,91 @@ type User = {
   createdAt: string;
 };
 
-type AuthContextType = {
-  user: User | null;
+type LegacyAuthApi = {
+  user: LegacyUser | null;
   signIn: (email: string, password: string) => Promise<boolean>;
-  signUp: (name: string, email: string, password: string, phone?: string) => Promise<boolean>;
+  signUp: (
+    name: string,
+    email: string,
+    password: string,
+    phone?: string
+  ) => Promise<boolean>;
   signOut: () => Promise<void>;
-  updateProfile: (updates: Partial<Pick<User, "name" | "phone" | "avatarUrl">>) => void;
+  updateProfile: (
+    updates: Partial<Pick<LegacyUser, "name" | "phone" | "avatarUrl">>
+  ) => void;
   isLoading: boolean;
 };
 
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  signIn: async () => false,
-  signUp: async () => false,
-  signOut: async () => {},
-  updateProfile: () => {},
-  isLoading: true,
-});
+export function useAuth(): LegacyAuthApi {
+  const { user, isLoading, signInWithPassword, signUp, signOut, refresh } =
+    useNewAuth();
+  const supabase = getSupabaseBrowserClient();
 
-async function fetchSession(): Promise<User | null> {
-  try {
-    const res = await fetch("/api/v1/auth/session");
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.user || null;
-  } catch {
-    return null;
-  }
-}
+  const legacyUser = useMemo<LegacyUser | null>(() => {
+    if (!user) return null;
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      phone: user.phone ?? undefined,
+      avatarUrl: user.avatarUrl ?? undefined,
+      isVerified: user.isVerified,
+      vendorId: user.vendorId ?? undefined,
+      vendorType: user.vendorType ?? undefined,
+      // createdAt is not surfaced by the new session payload; legacy callers
+      // only use it for display and are tolerant of an empty string.
+      createdAt: "",
+    };
+  }, [user]);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const { mode } = useDataMode();
-
-  useEffect(() => {
-    if (mode === "mock") {
-      const stored = localStorage.getItem("ev_mock_user");
-      if (stored) {
-        try {
-          const u = JSON.parse(stored);
-          setUser({
-            id: "mock-1",
-            name: u.name,
-            email: u.email,
-            role: u.role || "customer",
-            phone: u.phone,
-            avatarUrl: u.avatarUrl,
-            isVerified: true,
-            createdAt: u.joinedAt || "2025-01-01",
-          });
-        } catch {
-          localStorage.removeItem("ev_mock_user");
-        }
-      }
-      setIsLoading(false);
-    } else {
-      fetchSession().then((u) => {
-        setUser(u);
-        setIsLoading(false);
-      });
-    }
-  }, [mode]);
-
-  const signIn = async (email: string, password: string): Promise<boolean> => {
-    if (mode === "mock") {
-      const mockUser: User = {
-        id: "mock-1",
-        name: email.split("@")[0],
-        email,
-        phone: "+60 12 345 6789",
-        avatarUrl: "https://i.pravatar.cc/100?img=32",
-        role: "customer",
-        isVerified: true,
-        createdAt: new Date().toISOString().split("T")[0],
-      };
-      setUser(mockUser);
-      localStorage.setItem("ev_mock_user", JSON.stringify({ name: mockUser.name, email: mockUser.email, role: "customer" }));
-      return true;
-    }
-
-    try {
-      const res = await fetch("/api/v1/auth/sign-in", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!res.ok) return false;
-      const data = await res.json();
-      setUser(data.user);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const signUp = async (name: string, email: string, password: string, phone?: string): Promise<boolean> => {
-    if (mode === "mock") {
-      const mockUser: User = {
-        id: "mock-1",
-        name,
-        email,
-        phone: phone || "+60 12 345 6789",
-        avatarUrl: "https://i.pravatar.cc/100?img=32",
-        role: "customer",
-        isVerified: true,
-        createdAt: new Date().toISOString().split("T")[0],
-      };
-      setUser(mockUser);
-      localStorage.setItem("ev_mock_user", JSON.stringify({ name, email, phone, role: "customer" }));
-      return true;
-    }
-
-    try {
-      const res = await fetch("/api/v1/auth/sign-up", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password, phone }),
-      });
-      if (!res.ok) return false;
-      const data = await res.json();
-      setUser(data.user);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const signOut = async () => {
-    if (mode === "mock") {
-      setUser(null);
-      localStorage.removeItem("ev_mock_user");
-      return;
-    }
-    await fetch("/api/v1/auth/sign-out", { method: "POST" });
-    setUser(null);
-  };
-
-  const updateProfile = (updates: Partial<Pick<User, "name" | "phone" | "avatarUrl">>) => {
-    if (!user) return;
-    const updated = { ...user, ...updates };
-    setUser(updated);
-    if (mode === "mock") {
-      localStorage.setItem("ev_mock_user", JSON.stringify(updated));
-    }
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, signIn, signUp, signOut, updateProfile, isLoading }}>
-      {children}
-    </AuthContext.Provider>
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      const r = await signInWithPassword(email, password);
+      return r.ok;
+    },
+    [signInWithPassword]
   );
-}
 
-export function useAuth() {
-  return useContext(AuthContext);
+  const legacySignUp = useCallback(
+    async (name: string, email: string, password: string, phone?: string) => {
+      const r = await signUp({ name, email, password, phone });
+      return r.ok;
+    },
+    [signUp]
+  );
+
+  const updateProfile = useCallback<LegacyAuthApi["updateProfile"]>(
+    (updates) => {
+      // Persist to public.users via the dedicated profile endpoint, not to
+      // auth.users.user_metadata. The new SessionUser is read from public.users
+      // (joined in lib/auth/server.ts), so writing only to user_metadata would
+      // make profile edits silently disappear after a refresh.
+      void fetch("/api/v1/users/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: updates.name,
+          phone: updates.phone,
+          avatarUrl: updates.avatarUrl,
+        }),
+      })
+        .then(() => refresh())
+        .catch(() => {
+          // Best-effort; legacy callers were synchronous and didn't surface
+          // failures. Phase 3 replaces this with a proper server action.
+        });
+    },
+    [refresh]
+  );
+
+  return {
+    user: legacyUser,
+    signIn,
+    signUp: legacySignUp,
+    signOut,
+    updateProfile,
+    isLoading,
+  };
 }

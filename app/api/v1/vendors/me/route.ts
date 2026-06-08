@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
-import { requireAuth } from "@/lib/auth/middleware";
+import { requireRole } from "@/lib/auth/server";
 import { handleApiError } from "@/lib/utils/errors";
 import { eq } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    const authError = requireAuth(user);
-    if (authError) return authError;
+    const userOrResp = await requireRole("vendor");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const vendorProfile = await db.query.vendorProfiles.findFirst({
-      where: (vp) => eq(vp.userId, user!.sub),
+      where: (vp) => eq(vp.userId, user.id),
     });
 
     if (!vendorProfile) {
@@ -23,7 +22,7 @@ export async function GET(request: NextRequest) {
     }
 
     const vendorUser = await db.query.users.findFirst({
-      where: (u) => eq(u.id, user!.sub),
+      where: (u) => eq(u.id, user.id),
     });
 
     const documents = await db.query.vendorDocuments.findMany({
@@ -46,12 +45,12 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    const authError = requireAuth(user);
-    if (authError) return authError;
+    const userOrResp = await requireRole("vendor");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const vendorProfile = await db.query.vendorProfiles.findFirst({
-      where: (vp) => eq(vp.userId, user!.sub),
+      where: (vp) => eq(vp.userId, user.id),
     });
     if (!vendorProfile) {
       return NextResponse.json(

@@ -1,22 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
+
+import { useAdminFlags, useResolveFlag, type ApiFlag } from "@/hooks/use-admin";
 
 type FlagType = "review" | "listing" | "message";
-type FlagStatus = "pending" | "resolved";
-
-interface ApiFlag {
-  id: string;
-  type: FlagType;
-  targetId: string;
-  targetTitle: string | null;
-  targetPreview: string;
-  flagReason: string;
-  status: FlagStatus;
-  flaggedBy: { id: string | null; name: string; email: string | null };
-  createdAt: string;
-  resolvedAt: string | null;
-}
 
 const typeColors: Record<FlagType, string> = {
   review: "bg-amber-500/10 text-amber-400",
@@ -37,54 +25,17 @@ function relativeTime(iso: string): string {
 }
 
 export default function AdminModerationPage() {
-  const [items, setItems] = useState<ApiFlag[]>([]);
   const [filter, setFilter] = useState<"pending" | "resolved" | "all">("pending");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ status: filter, limit: "100" });
-      const res = await fetch(`/api/v1/admin/moderation?${params.toString()}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) {
-        setError("Could not load flagged content.");
-        return;
-      }
-      const json = await res.json();
-      setItems(json.data as ApiFlag[]);
-    } catch {
-      setError("Network error.");
-    } finally {
-      setLoading(false);
-    }
-  }, [filter]);
+  const { data: items = [], isLoading: loading, error } = useAdminFlags(filter);
+  const resolve = useResolveFlag();
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const handleAction = async (flagId: string, action: "resolve" | "dismiss") => {
-    setBusyId(flagId);
-    try {
-      const res = await fetch(
-        `/api/v1/admin/moderation?flagId=${flagId}&action=${action}`,
-        { method: "PUT" }
-      );
-      if (!res.ok) {
-        setError(`Could not ${action} flag.`);
-        return;
-      }
-      // Refetch so the row drops out of the active filter view.
-      await load();
-    } finally {
-      setBusyId(null);
-    }
+  const handleAction = (flagId: string, action: "resolve" | "dismiss") => {
+    resolve.mutate({ flagId, action });
   };
+
+  const busyId = resolve.isPending ? resolve.variables?.flagId ?? null : null;
+  const errorMessage = error?.message ?? null;
 
   const pendingCount = items.filter((i) => i.status === "pending").length;
 
@@ -104,7 +55,7 @@ export default function AdminModerationPage() {
 
       {error && (
         <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          {error}
+          {errorMessage}
         </div>
       )}
 

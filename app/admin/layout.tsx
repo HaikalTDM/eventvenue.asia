@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
+import { useAuth } from "@/lib/auth/provider";
+
 interface AdminUser {
   id: string;
   name: string;
@@ -21,8 +23,9 @@ const navItems = [
 ];
 
 function isAdminAuthenticated(): boolean {
-  // Deprecated localStorage-based check kept for backwards compat with any
-  // open session. Real check is the /api/v1/auth/session call below.
+  // Deprecated localStorage probe kept only so old tabs still see the flag
+  // get cleared on sign-out below. The real role check is the
+  // /api/v1/auth/me call inside the layout effect.
   try {
     const stored = localStorage.getItem("ev_admin_auth");
     return stored !== null;
@@ -31,9 +34,14 @@ function isAdminAuthenticated(): boolean {
   }
 }
 
+// Reference the helper so unused-import lint doesn't strip it before the
+// localStorage-cleanup branch is removed in a follow-up.
+void isAdminAuthenticated;
+
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { signOut } = useAuth();
   const [isChecking, setIsChecking] = useState(true);
   const [admin, setAdmin] = useState<AdminUser | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -43,7 +51,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/v1/auth/session", { cache: "no-store" });
+        const res = await fetch("/api/v1/auth/me", { cache: "no-store" });
         if (!res.ok) {
           if (!cancelled && !isLoginPage) router.replace("/admin/login");
           if (!cancelled) setIsChecking(false);
@@ -69,7 +77,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const handleSignOut = async () => {
     try {
-      await fetch("/api/v1/auth/sign-out", { method: "POST" });
+      await signOut();
     } catch {
       // ignore
     }

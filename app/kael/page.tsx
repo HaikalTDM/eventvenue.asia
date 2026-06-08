@@ -1,12 +1,13 @@
 "use client";
 
 import { usePageVisibility, allPages, type PageKey } from "@/lib/page-visibility";
-import { useDataMode } from "@/lib/data-mode";
 import Link from "next/link";
 
 export default function KaelControlPanel() {
   const { visibility, setPageVisibility, setAllVisibility } = usePageVisibility();
-  const { mode, setMode } = useDataMode();
+  // The data-mode toggle is no longer relevant — Phase 1 made the data
+  // layer real, so the app always reads from the live database.
+  const mode: "live" = "live";
 
   const groups = ["Customer", "Vendor", "Auth", "Admin"] as const;
 
@@ -30,43 +31,25 @@ export default function KaelControlPanel() {
           </p>
         </div>
 
-        {/* Data Mode Toggle */}
+        {/* Data Mode Toggle (deprecated — Phase 1 removed mock mode) */}
         <div className="mt-6 rounded-2xl border border-gray-800 bg-gray-900 p-5">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-sm font-bold text-white">Data Source</h3>
               <p className="mt-1 text-xs text-gray-400">
-                {mode === "mock"
-                  ? "Using localStorage mock data — no backend required"
-                  : "Connected to live API & Supabase database"}
+                Connected to live API &amp; Supabase database
               </p>
             </div>
-            <div className="flex rounded-lg border border-gray-700 overflow-hidden">
-              <button
-                onClick={() => setMode("mock")}
-                className={`px-4 py-2 text-xs font-semibold transition-colors ${
-                  mode === "mock"
-                    ? "bg-amber-600 text-white"
-                    : "bg-gray-800 text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                Mock
-              </button>
-              <button
-                onClick={() => setMode("live")}
-                className={`px-4 py-2 text-xs font-semibold transition-colors ${
-                  mode === "live"
-                    ? "bg-green-600 text-white"
-                    : "bg-gray-800 text-gray-400 hover:text-gray-200"
-                }`}
-              >
-                Live
-              </button>
-            </div>
+            <span
+              className={`rounded-lg border border-gray-700 px-4 py-2 text-xs font-semibold ${
+                mode === "live" ? "bg-green-700 text-white" : "bg-gray-800 text-gray-400"
+              }`}
+            >
+              Live
+            </span>
           </div>
           <p className="mt-3 text-xs text-gray-500">
-            Mock mode uses client-side localStorage. Live mode connects to the Supabase database via the API.
-            Switching mode will reset your session.
+            The mock-data toggle was removed in Phase 1. The app now always reads from the live Supabase database.
           </p>
         </div>
 

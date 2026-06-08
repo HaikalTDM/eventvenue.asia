@@ -25,6 +25,7 @@ export default function AddServicePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Basic Info
   const [title, setTitle] = useState("");
@@ -95,13 +96,56 @@ export default function AddServicePage() {
     setPhotos((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
+
+    if (!title.trim()) {
+      setSubmitError("Service title is required.");
+      return;
+    }
+    if (!category) {
+      setSubmitError("Please pick a service category.");
+      return;
+    }
+
+    // Pick the lowest-priced package as the listing's headline price.
+    // The full package list will be persisted via service_packages once
+    // the dedicated endpoint lands; for now we just surface a starting price.
+    const numericPrices = packages
+      .map((p) => parseFloat(p.price))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    const headlinePrice = numericPrices.length > 0 ? Math.min(...numericPrices) : undefined;
+
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const body: Record<string, unknown> = {
+        listingType: "service",
+        title,
+        description: description || undefined,
+        location: location || undefined,
+        halalCertified,
+        eventTypes: selectedEventTypes,
+      };
+      if (headlinePrice !== undefined) body.pricePerHour = headlinePrice;
+
+      const res = await fetch("/api/v1/listings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        const detail = err?.error?.details?.[0]?.message;
+        setSubmitError(detail || err?.error?.message || "Could not create service listing.");
+        return;
+      }
       setSuccess(true);
-    }, 1500);
+    } catch {
+      setSubmitError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (success) {

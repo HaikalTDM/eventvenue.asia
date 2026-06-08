@@ -1,12 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { useParams, notFound } from "next/navigation";
-import { getListings, getListingDetail } from "@/lib/api";
-import type { ApiListingsResponse, ApiListingDetail, ApiDetailResponse } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
+import { useListing, useListings, type ApiListingDetail } from "@/hooks/use-listings";
 import type { Venue } from "@/lib/types";
-import { useDataMode } from "@/lib/data-mode";
-import { mockVenues } from "@/lib/mock-data";
 import StickyNav from "@/components/StickyNav";
 import ImageGallery from "@/components/ImageGallery";
 import VenueHeader from "@/components/VenueHeader";
@@ -54,8 +51,8 @@ function mapDetailToVenue(data: ApiListingDetail): Venue {
     })),
     faqs: [],
     coordinates: {
-      lat: typeof data.latitude === "number" ? data.latitude : 0,
-      lng: typeof data.longitude === "number" ? data.longitude : 0,
+      lat: data.latitude != null ? Number(data.latitude) : 0,
+      lng: data.longitude != null ? Number(data.longitude) : 0,
     },
     address: data.address || "",
     blockedDates: data.availability?.blockedDates || [],
@@ -65,96 +62,72 @@ function mapDetailToVenue(data: ApiListingDetail): Venue {
 export default function VenueDetailPage() {
   const params = useParams();
   const slug = params.id as string;
-  const { mode } = useDataMode();
 
-  const [venue, setVenue] = useState<Venue | null>(null);
-  const [relatedVenues, setRelatedVenues] = useState<Venue[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notFoundResult, setNotFoundResult] = useState(false);
+  const {
+    data: detailData,
+    isLoading: detailLoading,
+    error: detailError,
+    refetch: refetchDetail,
+  } = useListing(slug);
 
-  const fetchVenue = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setNotFoundResult(false);
+  // Related-venues query stays cheap by limiting to 4. The hook returns the
+  // discovery-list response shape, so we map the same way as the grid.
+  const { data: relatedData } = useListings(
+    { type: "venue", limit: 4 },
+    { enabled: Boolean(detailData) }
+  );
 
-    if (mode === "mock") {
-      const matched = mockVenues.find((v) => v.slug === slug || v.id === slug);
-      if (!matched) {
-        setNotFoundResult(true);
-        setLoading(false);
-        return;
-      }
-      setVenue(matched);
-      document.title = `${matched.title} | EventVenue.Asia`;
-      const related = mockVenues.filter((v) => v.id !== matched.id).slice(0, 3);
-      setRelatedVenues(related);
-      setLoading(false);
-      return;
-    }
+  const venue = useMemo<Venue | null>(
+    () => (detailData ? mapDetailToVenue(detailData) : null),
+    [detailData]
+  );
 
-    try {
-      // Detail endpoint accepts either UUID or slug; pass the route param
-      // straight through. Avoids the previous indirect search-by-q which
-      // missed listings whose slug didn't appear in title/description/
-      // location.
-      const detailResponse: ApiDetailResponse = await getListingDetail(slug);
+  const relatedVenues = useMemo<Venue[]>(() => {
+    if (!detailData || !relatedData) return [];
+    return relatedData.data
+      .filter((item) => item.id !== detailData.id)
+      .slice(0, 3)
+      .map((item): Venue => ({
+        id: item.id,
+        title: item.title,
+        slug: item.slug,
+        location: item.location || "",
+        pricePerHour: Number(item.pricePerHour),
+        currency: item.currency,
+        capacity: item.capacity || 0,
+        rating: Number(item.averageRating),
+        reviewCount: item.reviewCount,
+        halalVerified: item.halalCertified,
+        thumbnailUrl: item.primaryPhoto?.url || "",
+        galleryUrls: item.primaryPhoto ? [item.primaryPhoto.url] : [],
+        eventTypes: item.eventTypes,
+        amenities: item.amenities,
+        description: "",
+        hostName: item.vendor?.businessName || "",
+        hostAvatar: undefined,
+        hostResponseRate: 0,
+        hostResponseTime: "",
+        reviews: [],
+        faqs: [],
+        coordinates: { lat: 0, lng: 0 },
+        address: "",
+        blockedDates: [],
+      }));
+  }, [detailData, relatedData]);
 
-      const mappedVenue = mapDetailToVenue(detailResponse.data);
-      setVenue(mappedVenue);
-
-      document.title = `${mappedVenue.title} | EventVenue.Asia`;
-
-      try {
-        const relatedResponse = await getListings({
-          type: "venue",
-          limit: "4",
-        });
-        const related = relatedResponse.data
-          .filter((item) => item.id !== mappedVenue.id)
-          .slice(0, 3)
-          .map(
-            (item): Venue => ({
-              id: item.id,
-              title: item.title,
-              slug: item.slug,
-              location: item.location || "",
-              pricePerHour: Number(item.pricePerHour),
-              currency: item.currency,
-              capacity: item.capacity || 0,
-              rating: Number(item.averageRating),
-              reviewCount: item.reviewCount,
-              halalVerified: item.halalCertified,
-              thumbnailUrl: item.primaryPhoto?.url || "",
-              galleryUrls: item.primaryPhoto ? [item.primaryPhoto.url] : [],
-              eventTypes: item.eventTypes,
-              amenities: item.amenities,
-              description: "",
-              hostName: item.vendor?.businessName || "",
-              hostAvatar: undefined,
-              hostResponseRate: 0,
-              hostResponseTime: "",
-              reviews: [],
-              faqs: [],
-              coordinates: { lat: 0, lng: 0 },
-              address: "",
-              blockedDates: [],
-            })
-          );
-        setRelatedVenues(related);
-      } catch {
-        setRelatedVenues([]);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load venue");
-    } finally {
-      setLoading(false);
-    }
-  }, [slug]);
-
+  // Update the document title once the detail row resolves. Kept as an effect
+  // so it stays accurate on client-side route changes.
   useEffect(() => {
-    fetchVenue();
-  }, [fetchVenue]);
+    if (venue) document.title = `${venue.title} | EventVenue.Asia`;
+  }, [venue]);
+
+  const loading = detailLoading;
+  // The new /api/v1/listings/[id] route returns a 404 when the slug is unknown
+  // — surface that as the "not found" UI instead of the generic error state.
+  const notFoundResult = Boolean(
+    detailError && /404|not_found/i.test(detailError.message)
+  );
+  const error = detailError && !notFoundResult ? detailError : null;
 
   if (loading) {
     return (
@@ -209,9 +182,9 @@ export default function VenueDetailPage() {
             <h2 className="text-xl font-bold text-gray-900">
               Something went wrong
             </h2>
-            <p className="mt-2 text-gray-500">{error}</p>
+            <p className="mt-2 text-gray-500">{error.message}</p>
             <button
-              onClick={fetchVenue}
+              onClick={() => refetchDetail()}
               className="mt-6 rounded-xl bg-[#EB4D4B] px-6 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-[#dc2626]"
             >
               Try Again

@@ -7,10 +7,11 @@ export const inquiryCreateSchema = z.object({
   guestCount: z.number().int().positive(),
   eventType: z.string().max(50).optional(),
   specialRequirements: z.string().optional(),
+  totalPrice: z.number().nonnegative().optional(),
 });
 
 export const inquiryStatusSchema = z.object({
-  status: z.enum(["accepted", "approved", "proceed", "ongoing", "completed", "cancelled"]),
+  status: z.enum(["accepted", "completed", "cancelled"]),
 });
 
 export type InquiryCreateInput = z.infer<typeof inquiryCreateSchema>;

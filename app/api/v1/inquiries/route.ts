@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { requireRole } from "@/lib/auth/server";
 import { handleApiError, notFound, validationError } from "@/lib/utils/errors";
-import { inquiryCreateSchema, inquiryStatusSchema } from "@/lib/validators/inquiry.schema";
+import { inquiryCreateSchema } from "@/lib/validators/inquiry.schema";
 import { eq, and } from "drizzle-orm";
 
 export async function POST(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireRole("customer");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const body = await request.json();
     const parsed = inquiryCreateSchema.safeParse(body);
@@ -20,7 +19,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { listingId, eventDate, eventTime, guestCount, eventType, specialRequirements } = parsed.data;
+    const { listingId, eventDate, eventTime, guestCount, eventType, specialRequirements, totalPrice } = parsed.data;
 
     const listing = await db.query.listings.findFirst({
       where: (l) => eq(l.id, listingId),
@@ -30,13 +29,14 @@ export async function POST(request: NextRequest) {
     const [inquiry] = await db
       .insert(schema.inquiries)
       .values({
-        customerId: user.sub,
+        customerId: user.id,
         listingId,
         eventDate,
         eventTime,
         guestCount,
         eventType: eventType || null,
         specialRequirements: specialRequirements || null,
+        totalPrice: totalPrice != null ? String(totalPrice) : null,
         status: "pending",
       })
       .returning();
@@ -49,17 +49,50 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireRole("customer");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const inquiries = await db.query.inquiries.findMany({
-      where: (i) => eq(i.customerId, user!.sub),
+      where: (i) => eq(i.customerId, user.id),
       orderBy: (i, { desc }) => desc(i.createdAt),
     });
 
-    return NextResponse.json({ data: inquiries });
+    const listingIds = [...new Set(inquiries.map((i) => i.listingId))];
+    const listings = listingIds.length > 0
+      ? await db.query.listings.findMany({
+          where: (l, { inArray }) => inArray(l.id, listingIds),
+        })
+      : [];
+
+    const primaryPhotos = listingIds.length > 0
+      ? await db.query.listingPhotos.findMany({
+          where: (p, { inArray, and, eq }) =>
+            and(inArray(p.listingId, listingIds), eq(p.isPrimary, true)),
+        })
+      : [];
+
+    const listingMap = new Map(listings.map((l) => [l.id, l]));
+    const photoMap = new Map(primaryPhotos.map((p) => [p.listingId, p]));
+
+    const data = inquiries.map((inquiry) => {
+      const listing = listingMap.get(inquiry.listingId);
+      const primaryPhoto = photoMap.get(inquiry.listingId);
+      return {
+        ...inquiry,
+        listing: listing
+          ? {
+              id: listing.id,
+              title: listing.title,
+              slug: listing.slug,
+              location: listing.location,
+              primaryPhoto: primaryPhoto ? { url: primaryPhoto.url } : null,
+            }
+          : undefined,
+      };
+    });
+
+    return NextResponse.json({ data });
   } catch (error) {
     return handleApiError(error);
   }

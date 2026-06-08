@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/auth/provider";
 
 type UserRole = "customer" | "vendor";
 
@@ -20,6 +20,7 @@ export default function SignUpPage() {
   const [loading, setLoading] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [verifySent, setVerifySent] = useState(false);
   const { signUp } = useAuth();
   const router = useRouter();
 
@@ -30,21 +31,57 @@ export default function SignUpPage() {
     e.preventDefault();
     if (passwordMismatch || !agreedToTerms) return;
     setLoading(true);
-    const success = await signUp(fullName, email, password, phone);
-    setLoading(false);
-    if (!success) {
-      setNotice("Could not create account. The email may already be in use.");
-      return;
+    setNotice(null);
+    try {
+      const result = await signUp({
+        name: fullName,
+        email,
+        password,
+        phone,
+        role: "customer",
+      });
+
+      if (!result.ok) {
+        const msg = result.error.toLowerCase();
+        if (msg.includes("already") || msg.includes("registered") || msg.includes("exists")) {
+          setNotice("Email already registered. Try signing in instead.");
+        } else {
+          setNotice(result.error || "Could not create account. Please try again.");
+        }
+        setLoading(false);
+        return;
+      }
+
+      // Verification gate ON: Supabase requires email confirmation. Show "check
+      // your inbox" panel — the new account has no session until the user clicks
+      // the link in the email.
+      if (result.needsVerification) {
+        setVerifySent(true);
+        setLoading(false);
+        return;
+      }
+
+      // Verification gate OFF: session is live. Land on the home page.
+      setLoading(false);
+      router.push("/");
+      router.refresh();
+    } catch {
+      setNotice("Network error. Please try again.");
+      setLoading(false);
     }
-    router.push("/");
   };
 
-  const handleGoogle = () => {
-    if (GOOGLE_OAUTH_ENABLED) {
-      window.location.href = "/api/v1/auth/google/start";
+  const handleGoogle = async () => {
+    if (!GOOGLE_OAUTH_ENABLED) {
+      setNotice("Google sign-up is not yet available. Please use email.");
       return;
     }
-    setNotice("Google sign-up is not yet available. Please use email.");
+    const supabase = (await import("@/lib/auth/client")).getSupabaseBrowserClient();
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
+    });
+    if (error) setNotice(error.message);
   };
 
   return (
@@ -129,7 +166,34 @@ export default function SignUpPage() {
       )}
 
       {/* Customer Registration Flow */}
-      {role === "customer" && (
+      {role === "customer" && verifySent && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-8 text-center shadow-sm">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
+            <svg className="h-7 w-7 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <h3 className="mt-4 text-lg font-semibold text-gray-900">
+            Check your inbox
+          </h3>
+          <p className="mt-2 text-sm text-gray-600">
+            We sent a verification link to <span className="font-medium text-gray-900">{email}</span>.
+            Click the link in that email to activate your account, then sign in.
+          </p>
+          <p className="mt-4 text-xs text-gray-500">
+            The link expires in 24 hours. Didn&apos;t receive it? Check your spam folder, or contact support if it still hasn&apos;t arrived.
+          </p>
+          <Link
+            href="/sign-in"
+            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#EB4D4B] px-6 py-3 text-sm font-bold text-white shadow-md shadow-[#EB4D4B]/25 transition-all hover:bg-[#dc2626]"
+          >
+            Go to sign in
+          </Link>
+        </div>
+      )}
+
+      {/* Customer Registration Form */}
+      {role === "customer" && !verifySent && (
         <>
       {/* Social Login */}
       <div>

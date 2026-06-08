@@ -1,14 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import { useVendorAuth } from "@/lib/vendor-auth";
 import VendorPortalLayout from "@/components/VendorPortalLayout";
-import {
-  getListings,
-  getVendorInquiries,
-  getVendorBookings,
-  getVendorProfile,
-} from "@/lib/api";
+import { useListings } from "@/hooks/use-listings";
+import { useVendorInquiries } from "@/hooks/use-inquiries";
+import { useVendorBookings } from "@/hooks/use-bookings";
 
 interface DashboardStats {
   activeListings: number;
@@ -20,85 +17,59 @@ interface DashboardStats {
 
 export default function VendorDashboardPage() {
   const { vendor } = useVendorAuth();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!vendor) return;
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // Vendor profile is used to learn what listingType to filter by.
-        const profile = (await getVendorProfile().catch(() => null)) as {
-          data?: { vendorType?: string };
-        } | null;
-        const vendorType =
-          profile?.data?.vendorType === "service_provider" ? "service" : "venue";
+  const isVenueType =
+    vendor?.vendorType === "venue" || vendor?.vendorType === "venue_owner";
+  const listingType = isVenueType ? "venue" : "service";
 
-        // mine=true returns this vendor's listings regardless of status,
-        // so the dashboard sees drafts and paused listings too. The
-        // "Active Listings" card then filters on status==='active'
-        // explicitly instead of relying on the public-endpoint filter.
-        const [listingsRes, inquiriesRes, bookingsRes] = await Promise.all([
-          getListings({ mine: "true", listingType: vendorType }).catch(() => null),
-          getVendorInquiries().catch(() => ({ data: [] })),
-          getVendorBookings().catch(() => ({ data: [] })),
-        ]);
+  // mine=true returns this vendor's listings regardless of status, so the
+  // dashboard sees drafts and paused listings too. The "Active Listings"
+  // card then filters on status==='active' explicitly. The hooks are
+  // gated on `vendor` so we don't fire requests before the session resolves.
+  const { data: listingsResponse, error: listingsError } = useListings(
+    { mine: true, type: listingType },
+    { enabled: Boolean(vendor) }
+  );
+  const { data: inquiries = [], error: inquiriesError } = useVendorInquiries({
+    enabled: Boolean(vendor),
+  });
+  const { data: bookings = [], error: bookingsError } = useVendorBookings({
+    enabled: Boolean(vendor),
+  });
 
-        const listings = listingsRes?.data ?? [];
-        const inquiries = inquiriesRes.data ?? [];
-        const bookings = bookingsRes.data as Array<Record<string, unknown>>;
+  const loading = !vendor || (!listingsResponse && !listingsError);
+  const error =
+    listingsError?.message ?? inquiriesError?.message ?? bookingsError?.message ?? null;
 
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const stats = useMemo<DashboardStats | null>(() => {
+    if (!listingsResponse) return null;
 
-        const monthRevenue = bookings
-          .filter((b) => {
-            const status = b.status as string | undefined;
-            const dateStr = b.eventDate as string | undefined;
-            if (!status || !dateStr) return false;
-            if (!["confirmed", "in_progress", "completed"].includes(status))
-              return false;
-            return new Date(dateStr) >= startOfMonth;
-          })
-          .reduce((sum, b) => sum + Number(b.totalAmount ?? 0), 0);
+    const listings = listingsResponse.data ?? [];
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-        const currency =
-          (bookings[0]?.currency as string | undefined) ||
-          (listings[0]?.currency as string | undefined) ||
-          "MYR";
+    const monthRevenue = bookings
+      .filter((b) => {
+        if (!b.status || !b.eventDate) return false;
+        if (!["confirmed", "in_progress", "completed"].includes(b.status)) return false;
+        return new Date(b.eventDate) >= startOfMonth;
+      })
+      .reduce((sum, b) => sum + Number(b.totalAmount ?? 0), 0);
 
-        const computed: DashboardStats = {
-          activeListings: listings.filter(
-            (l) => (l as { status?: string }).status !== "paused"
-          ).length,
-          pendingInquiries: inquiries.filter(
-            (i) => i.status === "pending" || i.status === "accepted"
-          ).length,
-          confirmedBookings: bookings.filter((b) => {
-            const s = b.status as string | undefined;
-            return s === "confirmed" || s === "in_progress";
-          }).length,
-          monthRevenue,
-          currency,
-        };
+    const currency = listings[0]?.currency ?? "MYR";
 
-        if (!cancelled) setStats(computed);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load stats");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
+    return {
+      activeListings: listings.filter((l) => l.status !== "paused").length,
+      pendingInquiries: inquiries.filter(
+        (i) => i.status === "pending" || i.status === "accepted"
+      ).length,
+      confirmedBookings: bookings.filter(
+        (b) => b.status === "confirmed" || b.status === "in_progress"
+      ).length,
+      monthRevenue,
+      currency,
     };
-  }, [vendor]);
+  }, [listingsResponse, inquiries, bookings]);
 
   if (!vendor) {
     // Defer to VendorPortalLayout's own loading + redirect logic. Returning

@@ -1,19 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { requireRole } from "@/lib/auth/server";
 import { reviewCreateSchema } from "@/lib/validators/review.schema";
 import { handleApiError, notFound, validationError, conflict } from "@/lib/utils/errors";
 import { eq } from "drizzle-orm";
 
 export async function POST(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
-    if (user.role !== "customer") {
-      return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
-    }
+    const userOrResp = await requireRole("customer");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const body = await request.json();
     const parsed = reviewCreateSchema.safeParse(body);
@@ -26,7 +22,7 @@ export async function POST(request: NextRequest) {
     const { listingId, rating, comment } = parsed.data;
 
     const existing = await db.query.reviews.findFirst({
-      where: (r, { eq: eqFn, and: andFn }) => andFn(eqFn(r.customerId, user.sub), eqFn(r.listingId, listingId)),
+      where: (r, { eq: eqFn, and: andFn }) => andFn(eqFn(r.customerId, user.id), eqFn(r.listingId, listingId)),
     });
     if (existing) {
       throw conflict("You have already reviewed this listing");
@@ -39,7 +35,7 @@ export async function POST(request: NextRequest) {
 
     const [review] = await db
       .insert(schema.reviews)
-      .values({ customerId: user.sub, listingId, rating, comment: comment || null })
+      .values({ customerId: user.id, listingId, rating, comment: comment || null })
       .returning();
 
     const avgResult = await db

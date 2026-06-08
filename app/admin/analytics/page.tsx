@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useAdminAnalytics } from "@/hooks/use-admin";
 
 interface AnalyticsData {
   currentMonth: {
@@ -43,31 +43,9 @@ function formatChange(p: number | null): { text: string; positive: boolean } | n
 }
 
 export default function AdminAnalyticsPage() {
-  const [data, setData] = useState<AnalyticsData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/v1/admin/analytics", { cache: "no-store" });
-        if (!res.ok) {
-          if (!cancelled) setError("Could not load analytics.");
-          return;
-        }
-        const json = await res.json();
-        if (!cancelled) setData(json.data as AnalyticsData);
-      } catch {
-        if (!cancelled) setError("Network error while loading analytics.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data, isLoading: loading, error } = useAdminAnalytics();
+  const errorMessage = error?.message ?? null;
+  const typed = data as AnalyticsData | undefined;
 
   if (loading) {
     return (
@@ -80,18 +58,18 @@ export default function AdminAnalyticsPage() {
     );
   }
 
-  if (error || !data) {
+  if (error || !typed) {
     return (
       <div>
         <h1 className="text-2xl font-bold text-white">Platform Analytics</h1>
         <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          {error || "No analytics data."}
+          {errorMessage || "No analytics data."}
         </div>
       </div>
     );
   }
 
-  const { currentMonth, trend, eventTypes, topListings } = data;
+  const { currentMonth, trend, eventTypes, topListings } = typed;
   const maxBookings = Math.max(1, ...trend.map((t) => t.bookings));
 
   const cards = [

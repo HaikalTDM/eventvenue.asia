@@ -1,15 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { getSupabaseServerClient } from "@/lib/auth/server";
 
-export async function POST(_request: NextRequest) {
-  const response = NextResponse.json({ success: true });
-  const cookieOpts = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    path: "/",
-    maxAge: 0,
-  };
-  response.cookies.set("refreshToken", "", cookieOpts);
-  response.cookies.set("accessToken", "", cookieOpts);
-  return response;
+export async function POST() {
+  const supabase = await getSupabaseServerClient();
+  await supabase.auth.signOut();
+  return NextResponse.json({ ok: true });
 }

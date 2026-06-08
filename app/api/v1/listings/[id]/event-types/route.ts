@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { requireRole } from "@/lib/auth/server";
 import { handleApiError, notFound } from "@/lib/utils/errors";
 import { eq, inArray } from "drizzle-orm";
 
@@ -10,11 +10,9 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const { user } = await authenticate(request);
-
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireRole(["vendor", "admin"]);
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const listing = await db.query.listings.findFirst({
       where: (l) => eq(l.id, id),
@@ -22,7 +20,7 @@ export async function POST(
     if (!listing) throw notFound("Listing");
 
     const vendorProfile = await db.query.vendorProfiles.findFirst({
-      where: (vp) => eq(vp.userId, user.sub),
+      where: (vp) => eq(vp.userId, user.id),
     });
     if (!vendorProfile || (vendorProfile.id !== listing.vendorId && user.role !== "admin")) {
       return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });

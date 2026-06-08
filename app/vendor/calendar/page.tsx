@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { getListings, getListingDetail, type ApiListing, type ApiListingDetail } from "@/lib/api";
+import { useEffect, useState } from "react";
+
+import { useListings } from "@/hooks/use-listings";
+import type { ApiListingDetail } from "@/lib/api";
 import type { VendorAppointment } from "@/lib/types";
 import VendorPortalLayout from "@/components/VendorPortalLayout";
 
@@ -60,52 +62,69 @@ function apiAppointmentToVendorApt(
 export default function VendorCalendarPage() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [venueInfos, setVenueInfos] = useState<CalendarVenueInfo[]>([]);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+
+  // Pull the listing list through React Query so the calendar shares the
+  // same cache as the rest of the vendor portal. Detail (availability) is
+  // still fetched per-listing inline because there's no batched endpoint
+  // for "all my availabilities" yet — when that lands, swap in a single
+  // hook and drop the per-id fan-out below.
+  const {
+    data: listingsResponse,
+    isLoading: listLoading,
+    error: listError,
+  } = useListings({ type: "venue" });
 
   useEffect(() => {
-    async function load() {
+    if (!listingsResponse) return;
+    let cancelled = false;
+    (async () => {
+      setDetailsLoading(true);
+      setDetailsError(null);
       try {
-        setLoading(true);
-        setError(null);
-        const listingsResult = await getListings({ listingType: "venue" });
-        const listings = listingsResult.data;
-
+        const listings = listingsResponse.data;
         const details = await Promise.all(
           listings.map(async (l) => {
             try {
-              const detail = await getListingDetail(l.id);
-              return detail.data;
+              const res = await fetch(`/api/v1/listings/${l.id}`, {
+                cache: "no-store",
+              });
+              if (!res.ok) return null;
+              const body = (await res.json()) as { data: ApiListingDetail };
+              return body.data;
             } catch {
               return null;
             }
           })
         );
-
-        const infos: CalendarVenueInfo[] = [];
-        for (let i = 0; i < listings.length; i++) {
-          const l = listings[i];
-          const detail = details[i];
-          infos.push({
-            id: l.id,
-            title: l.title,
-            dot: DOT_COLORS[i % DOT_COLORS.length],
-            blockedDates: detail?.availability?.blockedDates ?? [],
-            appointments: detail?.availability?.appointments ?? [],
-          });
-        }
+        if (cancelled) return;
+        const infos: CalendarVenueInfo[] = listings.map((l, i) => ({
+          id: l.id,
+          title: l.title,
+          dot: DOT_COLORS[i % DOT_COLORS.length],
+          blockedDates: details[i]?.availability?.blockedDates ?? [],
+          appointments: details[i]?.availability?.appointments ?? [],
+        }));
         setVenueInfos(infos);
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load calendar data"
-        );
+        if (!cancelled) {
+          setDetailsError(
+            err instanceof Error ? err.message : "Failed to load calendar data"
+          );
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setDetailsLoading(false);
       }
-    }
-    load();
-  }, []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [listingsResponse]);
+
+  const loading = listLoading || detailsLoading;
+  const error = listError?.message ?? detailsError;
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();

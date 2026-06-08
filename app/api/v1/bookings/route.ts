@@ -1,19 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { requireRole } from "@/lib/auth/server";
 import { bookingCreateSchema, bookingServiceSchema, bookingStatusSchema } from "@/lib/validators/booking.schema";
 import { handleApiError, notFound, validationError, conflict } from "@/lib/utils/errors";
 import { eq, and } from "drizzle-orm";
 
 export async function POST(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
-    if (user.role !== "customer") {
-      return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
-    }
+    const userOrResp = await requireRole("customer");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const body = await request.json();
     const parsed = bookingCreateSchema.safeParse(body);
@@ -33,7 +29,7 @@ export async function POST(request: NextRequest) {
     const [booking] = await db
       .insert(schema.bookings)
       .values({
-        customerId: user.sub,
+        customerId: user.id,
         listingId,
         inquiryId: inquiryId || null,
         eventDate,
@@ -60,7 +56,7 @@ export async function POST(request: NextRequest) {
         .returning();
 
       await db.insert(schema.conversationParticipants).values([
-        { conversationId: conversation.id, userId: user.sub },
+        { conversationId: conversation.id, userId: user.id },
         { conversationId: conversation.id, userId: vendorProfile.userId },
       ]);
     }
@@ -73,13 +69,12 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireRole("customer");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const bookings = await db.query.bookings.findMany({
-      where: (b) => eq(b.customerId, user!.sub),
+      where: (b) => eq(b.customerId, user.id),
       orderBy: (b, { desc }) => desc(b.createdAt),
     });
 

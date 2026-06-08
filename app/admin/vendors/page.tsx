@@ -1,22 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
+
+import { useAdminVendors, useVendorVerification } from "@/hooks/use-admin";
 
 type VendorStatus = "pending" | "approved" | "rejected";
-type VendorType = "venue_owner" | "service_provider";
-
-interface ApiVendor {
-  id: string;
-  vendorType: VendorType;
-  businessName: string;
-  businessLocation: string | null;
-  verificationStatus: VendorStatus;
-  verificationBadge: string;
-  createdAt: string;
-  userId: string;
-  userName: string;
-  userEmail: string;
-}
 
 function relativeTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -31,57 +19,20 @@ function relativeTime(iso: string): string {
 }
 
 export default function AdminVendorsPage() {
-  const [vendors, setVendors] = useState<ApiVendor[]>([]);
   const [filter, setFilter] = useState<"all" | VendorStatus>("pending");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [actionInFlight, setActionInFlight] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/v1/admin/vendors", { cache: "no-store" });
-      if (!res.ok) {
-        setError("Could not load vendors.");
-        return;
-      }
-      const json = await res.json();
-      setVendors(json.data as ApiVendor[]);
-    } catch {
-      setError("Network error.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data: vendors = [], isLoading: loading, error } = useAdminVendors({
+    status: filter,
+  });
+  const verify = useVendorVerification();
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const handleAction = async (vendorId: string, action: "approve" | "reject") => {
-    setActionInFlight(vendorId);
-    try {
-      const res = await fetch(`/api/v1/admin/vendors?vendorId=${vendorId}&action=${action}`, {
-        method: "PUT",
-      });
-      if (!res.ok) {
-        setError(`Could not ${action} vendor.`);
-        return;
-      }
-      // Optimistically update local state.
-      setVendors((prev) =>
-        prev.map((v) =>
-          v.id === vendorId
-            ? { ...v, verificationStatus: action === "approve" ? "approved" : "rejected" }
-            : v
-        )
-      );
-    } finally {
-      setActionInFlight(null);
-    }
+  const handleAction = (vendorId: string, action: "approve" | "reject") => {
+    verify.mutate({ vendorId, action });
   };
+
+  const actionInFlight = verify.isPending ? verify.variables?.vendorId ?? null : null;
+  const errorMessage = error?.message ?? null;
 
   const filtered = vendors.filter((v) => {
     if (filter === "all") return true;
@@ -104,7 +55,7 @@ export default function AdminVendorsPage() {
 
       {error && (
         <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          {error}
+          {errorMessage}
         </div>
       )}
 

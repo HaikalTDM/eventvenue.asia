@@ -1,417 +1,239 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { randomUUID } from "node:crypto";
+import { and, eq, inArray } from "drizzle-orm";
+import { z } from "zod";
+
+import { requireRole } from "@/lib/auth/server";
+import { listListings } from "@/lib/db/queries/listings";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
-import { listingCreateSchema, listingQuerySchema } from "@/lib/validators/listing.schema";
-import { handleApiError, validationError } from "@/lib/utils/errors";
-import { paginate } from "@/lib/utils/pagination";
-import { generateUniqueSlug } from "@/lib/utils/slug";
-import { eq, and, gte, lte, ilike, sql, desc, asc, inArray, or, SQL } from "drizzle-orm";
+import { listingCreateSchema } from "@/lib/validators/listing.schema";
+
+/**
+ * GET /api/v1/listings
+ *
+ * Public listing search. All filters are optional. The query layer applies
+ * `is_mock=false` and `status=active` by default so anonymous traffic only
+ * sees real, published listings. Pass `mine=true` (vendor-authenticated) to
+ * include the caller's own drafts and paused rows.
+ */
+const listQuerySchema = z.object({
+  type: z.enum(["venue", "service"]).optional(),
+  state: z.string().optional(),
+  city: z.string().optional(),
+  district: z.string().optional(),
+  search: z.string().optional(),
+  minCapacity: z.coerce.number().int().nonnegative().optional(),
+  maxCapacity: z.coerce.number().int().nonnegative().optional(),
+  minPrice: z.coerce.number().nonnegative().optional(),
+  maxPrice: z.coerce.number().nonnegative().optional(),
+  halalOnly: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .optional(),
+  amenityIds: z
+    .string()
+    .transform((s) => s.split(",").map(Number).filter(Number.isFinite))
+    .optional(),
+  eventTypeIds: z
+    .string()
+    .transform((s) => s.split(",").map(Number).filter(Number.isFinite))
+    .optional(),
+  sort: z.enum(["newest", "rating", "price_asc", "price_desc"]).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(24),
+  offset: z.coerce.number().int().nonnegative().default(0),
+  mine: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .optional(),
+});
 
 export async function GET(request: NextRequest) {
-  try {
-    const { user } = await authenticate(request);
-    const url = new URL(request.url);
-    const raw = Object.fromEntries(url.searchParams);
+  const url = new URL(request.url);
+  const raw = Object.fromEntries(url.searchParams);
+  const parsed = listQuerySchema.safeParse(raw);
 
-    const parsed = listingQuerySchema.safeParse(raw);
-    if (!parsed.success) {
-      throw validationError(
-        parsed.error.issues.map((i) => ({ field: i.path.join("."), message: i.message }))
-      );
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "invalid_query", issues: parsed.error.flatten().fieldErrors },
+      { status: 400 }
+    );
+  }
+
+  const { mine, ...filters } = parsed.data;
+
+  // Gather the rows first (both paths use the same enrichment step after).
+  let rows: Awaited<ReturnType<typeof listListings>>["rows"];
+  let total: number;
+
+  if (mine) {
+    const userOrResp = await requireRole("vendor");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
+    if (!user.vendorId) {
+      return NextResponse.json({ data: [], total: 0 });
     }
+    ({ rows, total } = await listListings({
+      ...filters,
+      vendorId: user.vendorId,
+      // Must be `null` (not `undefined`) — the default-arg only fires on
+      // `undefined`, so null skips the status filter.
+      status: null,
+      includeMock: false,
+    }));
+  } else {
+    ({ rows, total } = await listListings(filters));
+  }
 
-    const {
-      q, location, state, city, district, lat, lng, radius,
-      capacity, halal, amenities: amenitiesFilter,
-      eventTypes: eventTypesFilter, type, category, minPrice, maxPrice,
-      sort, page, limit,
-    } = parsed.data;
-
-    // "mine=true" returns the authenticated vendor's own listings,
-    // including drafts and paused. Used by /vendor/listings so vendors
-    // can see and manage listings that aren't yet visible to the public
-    // search.
-    const mineMode = url.searchParams.get("mine") === "true";
-
-    let conditions: SQL[];
-    if (mineMode) {
-      if (!user || user.role !== "vendor") {
-        return NextResponse.json(
-          { error: { code: "FORBIDDEN", message: "Vendor authentication required for mine=true" } },
-          { status: 403 }
-        );
-      }
-      const vendorProfile = await db.query.vendorProfiles.findFirst({
-        where: (vp, { eq: e }) => e(vp.userId, user.sub),
-      });
-      if (!vendorProfile) {
-        return NextResponse.json({
-          data: [],
-          pagination: paginate(page, limit, 0),
-          filters: { amenities: [], eventTypes: [] },
-        });
-      }
-      conditions = [eq(schema.listings.vendorId, vendorProfile.id)];
-    } else {
-      conditions = [
-        eq(schema.listings.status, "active"),
-        eq(schema.listings.isMock, false),
-      ];
-    }
-
-    if (type) conditions.push(eq(schema.listings.listingType, type));
-    if (location) conditions.push(ilike(schema.listings.location, `%${location}%`));
-    if (state) conditions.push(eq(schema.listings.state, state));
-    if (city) conditions.push(eq(schema.listings.city, city));
-    if (district) conditions.push(eq(schema.listings.district, district));
-    if (capacity) conditions.push(gte(schema.listings.capacity, capacity));
-    if (halal !== undefined) conditions.push(eq(schema.listings.halalCertified, halal));
-    if (minPrice) conditions.push(gte(schema.listings.pricePerHour, String(minPrice)));
-    if (maxPrice) conditions.push(lte(schema.listings.pricePerHour, String(maxPrice)));
-
-    // Geo radius filter (Haversine, km). Listings with NULL lat/lng are
-    // excluded automatically because the haversine expression is NULL for
-    // them and NULL fails the <= comparison.
-    const geoActive =
-      typeof lat === "number" && typeof lng === "number" && typeof radius === "number";
-    if (geoActive) {
-      conditions.push(
-        sql`6371 * acos(
-          cos(radians(${lat})) * cos(radians(${schema.listings.latitude}::float))
-          * cos(radians(${schema.listings.longitude}::float) - radians(${lng}))
-          + sin(radians(${lat})) * sin(radians(${schema.listings.latitude}::float))
-        ) <= ${radius}`
-      );
-    }
-    if (q) {
-      conditions.push(
-        or(
-          ilike(schema.listings.title, `%${q}%`),
-          ilike(schema.listings.description || sql`''`, `%${q}%`),
-          ilike(schema.listings.location || sql`''`, `%${q}%`)
-        )!
-      );
-    }
-
-    let listingIds: string[] = [];
-
-    if (amenitiesFilter) {
-      const amenityNames = amenitiesFilter.split(",").map((a) => a.trim());
-      const amenityRows = await db
-        .select({ id: schema.amenities.id })
-        .from(schema.amenities)
-        .where(inArray(schema.amenities.name, amenityNames));
-
-      for (const { id } of amenityRows) {
-        const matched = await db
-          .select({ listingId: schema.listingAmenities.listingId })
-          .from(schema.listingAmenities)
-          .where(eq(schema.listingAmenities.amenityId, id));
-        const matchedIds = matched.map((m) => m.listingId);
-        if (listingIds.length === 0) {
-          listingIds = matchedIds;
-        } else {
-          listingIds = listingIds.filter((lid) => matchedIds.includes(lid));
-        }
-      }
-      if (listingIds.length === 0) {
-        return NextResponse.json({ data: [], pagination: paginate(page, limit, 0), filters: { amenities: [], eventTypes: [] } });
-      }
-      conditions.push(inArray(schema.listings.id, listingIds));
-    }
-
-    if (eventTypesFilter) {
-      const eventTypeNames = eventTypesFilter.split(",").map((e) => e.trim());
-      const eventTypeRows = await db
-        .select({ id: schema.eventTypes.id })
-        .from(schema.eventTypes)
-        .where(inArray(schema.eventTypes.name, eventTypeNames));
-
-      const etIds: string[] = [];
-      for (const { id } of eventTypeRows) {
-        const matched = await db
-          .select({ listingId: schema.listingEventTypes.listingId })
-          .from(schema.listingEventTypes)
-          .where(eq(schema.listingEventTypes.eventTypeId, id));
-        const matchedIds = matched.map((m) => m.listingId);
-        if (etIds.length === 0) {
-          etIds.push(...matchedIds);
-        } else {
-          const filtered = etIds.filter((lid) => matchedIds.includes(lid));
-          etIds.length = 0;
-          etIds.push(...filtered);
-        }
-      }
-      if (etIds.length === 0) {
-        return NextResponse.json({ data: [], pagination: paginate(page, limit, 0), filters: { amenities: [], eventTypes: [] } });
-      }
-      conditions.push(inArray(schema.listings.id, etIds));
-    }
-
-    let orderFn;
-    switch (sort) {
-      case "price_asc": orderFn = asc(schema.listings.pricePerHour); break;
-      case "price_desc": orderFn = desc(schema.listings.pricePerHour); break;
-      case "newest": orderFn = desc(schema.listings.createdAt); break;
-      default: orderFn = desc(schema.listings.averageRating);
-    }
-
-    const baseWhere = and(...conditions);
-
-    const totalResult = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(schema.listings)
-      .where(baseWhere);
-
-    const total = totalResult[0]?.count || 0;
-
-    const offset = (page - 1) * limit;
-
-    const listings = await db
-      .select({
-        id: schema.listings.id,
-        title: schema.listings.title,
-        slug: schema.listings.slug,
-        listingType: schema.listings.listingType,
-        location: schema.listings.location,
-        capacity: schema.listings.capacity,
-        pricePerHour: schema.listings.pricePerHour,
-        currency: schema.listings.currency,
-        halalCertified: schema.listings.halalCertified,
-        averageRating: schema.listings.averageRating,
-        reviewCount: schema.listings.reviewCount,
-        createdAt: schema.listings.createdAt,
-        businessName: schema.vendorProfiles.businessName,
-        verificationBadge: schema.vendorProfiles.verificationBadge,
-      })
-      .from(schema.listings)
-      .leftJoin(schema.vendorProfiles, eq(schema.listings.vendorId, schema.vendorProfiles.id))
-      .where(baseWhere)
-      .orderBy(orderFn)
-      .limit(limit)
-      .offset(offset);
-
-    const lIds = listings.map((l) => l.id);
-
+  // Attach the primary photo to each row so the grid cards have a
+  // thumbnail without loading every listing's full relation tree. One
+  // batch query per page — minimal overhead vs. N+1 per card.
+  if (rows.length > 0) {
+    const ids = rows.map((r) => r.id);
     const photos = await db
-      .select()
+      .select({
+        listingId: schema.listingPhotos.listingId,
+        url: schema.listingPhotos.url,
+        altText: schema.listingPhotos.altText,
+      })
       .from(schema.listingPhotos)
       .where(
-        lIds.length > 0
-          ? and(inArray(schema.listingPhotos.listingId, lIds), eq(schema.listingPhotos.isPrimary, true))
-          : undefined
+        and(
+          inArray(schema.listingPhotos.listingId, ids),
+          eq(schema.listingPhotos.isPrimary, true)
+        )
       );
-
-    const photoMap = new Map(photos.map((p) => [p.listingId, p]));
-
-    let allAmenities: Array<{ listingId: string; name: string }> = [];
-    if (lIds.length > 0) {
-      allAmenities = await db
-        .select({
-          listingId: schema.listingAmenities.listingId,
-          name: schema.amenities.name,
-        })
-        .from(schema.listingAmenities)
-        .innerJoin(schema.amenities, eq(schema.listingAmenities.amenityId, schema.amenities.id))
-        .where(inArray(schema.listingAmenities.listingId, lIds));
-    }
-
-    const amenitiesMap = new Map<string, string[]>();
-    for (const a of allAmenities) {
-      const arr = amenitiesMap.get(a.listingId) || [];
-      arr.push(a.name);
-      amenitiesMap.set(a.listingId, arr);
-    }
-
-    let allEventTypes: Array<{ listingId: string; name: string }> = [];
-    if (lIds.length > 0) {
-      allEventTypes = await db
-        .select({
-          listingId: schema.listingEventTypes.listingId,
-          name: schema.eventTypes.name,
-        })
-        .from(schema.listingEventTypes)
-        .innerJoin(schema.eventTypes, eq(schema.listingEventTypes.eventTypeId, schema.eventTypes.id))
-        .where(inArray(schema.listingEventTypes.listingId, lIds));
-    }
-
-    const eventTypesMap = new Map<string, string[]>();
-    for (const e of allEventTypes) {
-      const arr = eventTypesMap.get(e.listingId) || [];
-      arr.push(e.name);
-      eventTypesMap.set(e.listingId, arr);
-    }
-
-    const data = listings.map((l) => ({
-      id: l.id,
-      title: l.title,
-      slug: l.slug,
-      listingType: l.listingType,
-      location: l.location,
-      capacity: l.capacity,
-      pricePerHour: l.pricePerHour,
-      currency: l.currency,
-      halalCertified: l.halalCertified,
-      averageRating: l.averageRating,
-      reviewCount: l.reviewCount,
-      primaryPhoto: photoMap.get(l.id) ? {
-        url: photoMap.get(l.id)!.url,
-        altText: photoMap.get(l.id)!.altText,
-      } : null,
-      vendor: {
-        businessName: l.businessName,
-        verificationBadge: l.verificationBadge,
-      },
-      amenities: amenitiesMap.get(l.id) || [],
-      eventTypes: eventTypesMap.get(l.id) || [],
-      createdAt: l.createdAt,
+    const photoByListingId = new Map(photos.map((p) => [p.listingId, { url: p.url, altText: p.altText }]));
+    const enriched = rows.map((r) => ({
+      ...r,
+      primaryPhoto: photoByListingId.get(r.id) ?? null,
     }));
-
-    const amenityCounts = await db
-      .select({
-        id: schema.amenities.id,
-        name: schema.amenities.name,
-        count: sql<number>`count(${schema.listingAmenities.listingId})::int`,
-      })
-      .from(schema.amenities)
-      .leftJoin(schema.listingAmenities, eq(schema.amenities.id, schema.listingAmenities.amenityId))
-      .groupBy(schema.amenities.id, schema.amenities.name);
-
-    const eventTypeCounts = await db
-      .select({
-        id: schema.eventTypes.id,
-        name: schema.eventTypes.name,
-        count: sql<number>`count(${schema.listingEventTypes.listingId})::int`,
-      })
-      .from(schema.eventTypes)
-      .leftJoin(schema.listingEventTypes, eq(schema.eventTypes.id, schema.listingEventTypes.eventTypeId))
-      .groupBy(schema.eventTypes.id, schema.eventTypes.name);
-
-    const response: Record<string, unknown> = {
-      data,
-      pagination: paginate(page, limit, total),
-      filters: {
-        amenities: amenityCounts.filter((a) => a.count > 0),
-        eventTypes: eventTypeCounts.filter((e) => e.count > 0),
-      },
-    };
-
-    return NextResponse.json(response);
-  } catch (error) {
-    return handleApiError(error);
+    return NextResponse.json({ data: enriched, total });
   }
+
+  return NextResponse.json({ data: rows, total });
 }
 
+function generateSlug(title: string): string {
+  const base = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "listing";
+  const suffix = randomUUID().split("-")[0];
+  return `${base}-${suffix}`;
+}
+
+/**
+ * POST /api/v1/listings
+ *
+ * Vendor-only. Creates a new listing in `draft` status. The slug is derived
+ * from the title with a UUID segment for uniqueness — no dependency on a DB
+ * trigger.
+ */
 export async function POST(request: NextRequest) {
+  const userOrResp = await requireRole("vendor");
+  if (userOrResp instanceof NextResponse) return userOrResp;
+  const user = userOrResp;
+  if (!user.vendorId) {
+    return NextResponse.json(
+      { error: { message: "Complete vendor onboarding before creating listings." } },
+      { status: 400 }
+    );
+  }
+
+  let body: unknown;
   try {
-    const { user } = await authenticate(request);
-    if (!user || user.role !== "vendor") {
-      return NextResponse.json(
-        { error: { code: "FORBIDDEN", message: "Only vendors can create listings" } },
-        { status: 403 }
-      );
-    }
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: { message: "Invalid JSON body." } },
+      { status: 400 }
+    );
+  }
 
-    const vendorProfile = await db.query.vendorProfiles.findFirst({
-      where: (vp) => eq(vp.userId, user.sub),
-    });
-    if (!vendorProfile || vendorProfile.verificationStatus !== "approved") {
-      return NextResponse.json(
-        { error: { code: "FORBIDDEN", message: "Vendor must be approved to create listings" } },
-        { status: 403 }
-      );
-    }
+  const parsed = listingCreateSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      {
+        error: {
+          message: "Invalid input.",
+          details: parsed.error.issues.map((i) => ({
+            path: i.path.join("."),
+            message: i.message,
+          })),
+        },
+      },
+      { status: 400 }
+    );
+  }
 
-    const body = await request.json();
-    const parsed = listingCreateSchema.safeParse(body);
-    if (!parsed.success) {
-      throw validationError(
-        parsed.error.issues.map((i) => ({ field: i.path.join("."), message: i.message }))
-      );
-    }
+  const input = parsed.data;
 
-    const { amenities: amenityNames, eventTypes: eventTypeNames, ...listingData } = parsed.data;
-
-    const slug = generateUniqueSlug(listingData.title);
-
-    const dbValues: Record<string, unknown> = {
-      vendorId: vendorProfile.id,
-      listingType: listingData.listingType,
-      title: listingData.title,
-      slug,
-      status: "draft" as const,
-    };
-
-    if (listingData.description !== undefined) dbValues.description = listingData.description;
-    if (listingData.location !== undefined) dbValues.location = listingData.location;
-    if (listingData.address !== undefined) dbValues.address = listingData.address;
-    if (listingData.capacity !== undefined) dbValues.capacity = listingData.capacity;
-    if (listingData.pricePerHour !== undefined) dbValues.pricePerHour = String(listingData.pricePerHour);
-    if (listingData.currency !== undefined) dbValues.currency = listingData.currency;
-    if (listingData.halalCertified !== undefined) dbValues.halalCertified = listingData.halalCertified;
-    if (listingData.coordinates !== undefined) dbValues.coordinates = listingData.coordinates;
-
-    const [listing] = await db
+  try {
+    const [row] = await db
       .insert(schema.listings)
-      .values(dbValues as typeof schema.listings.$inferInsert)
-      .returning();
+      .values({
+        vendorId: user.vendorId,
+        listingType: input.listingType,
+        title: input.title,
+        // Slug is generated here AND by the ensure_listing_slug trigger as a
+        // defensive fallback. Postgres function uses a random hex suffix;
+        // Node uses a UUID segment. Either guarantees uniqueness under
+        // concurrent inserts.
+        slug: generateSlug(input.title),
+        description: input.description ?? null,
+        location: input.location ?? null,
+        state: input.state ?? null,
+        city: input.city ?? null,
+        district: input.district ?? null,
+        latitude: input.latitude != null ? String(input.latitude) : null,
+        longitude: input.longitude != null ? String(input.longitude) : null,
+        address: input.address ?? null,
+        capacity: input.capacity ?? null,
+        pricePerHour: input.pricePerHour != null ? String(input.pricePerHour) : null,
+        currency: input.currency,
+        halalCertified: input.halalCertified,
+        // Vendors create in draft; an explicit publish flips status to active.
+        status: "draft",
+      })
+      .returning({ id: schema.listings.id, slug: schema.listings.slug });
 
-    if (amenityNames && amenityNames.length > 0) {
-      const existing = await db
-        .select()
+    if (input.amenities && input.amenities.length > 0) {
+      const matched = await db
+        .select({ id: schema.amenities.id })
         .from(schema.amenities)
-        .where(inArray(schema.amenities.name, amenityNames));
-
-      const newNames = amenityNames.filter(
-        (n) => !existing.some((a) => a.name === n)
-      );
-
-      if (newNames.length > 0) {
-        const inserted = await db
-          .insert(schema.amenities)
-          .values(newNames.map((n) => ({ name: n })))
-          .returning();
-
-        existing.push(...inserted);
+        .where(inArray(schema.amenities.name, input.amenities));
+      if (matched.length > 0) {
+        await db.insert(schema.listingAmenities).values(
+          matched.map((a) => ({ listingId: row.id, amenityId: a.id }))
+        );
       }
-
-      await db.insert(schema.listingAmenities).values(
-        existing.map((a) => ({
-          listingId: listing.id,
-          amenityId: a.id,
-        }))
-      );
     }
 
-    if (eventTypeNames && eventTypeNames.length > 0) {
-      const existing = await db
-        .select()
+    if (input.eventTypes && input.eventTypes.length > 0) {
+      const matched = await db
+        .select({ id: schema.eventTypes.id })
         .from(schema.eventTypes)
-        .where(inArray(schema.eventTypes.name, eventTypeNames));
-
-      const newNames = eventTypeNames.filter(
-        (n) => !existing.some((e) => e.name === n)
-      );
-
-      if (newNames.length > 0) {
-        const inserted = await db
-          .insert(schema.eventTypes)
-          .values(newNames.map((n) => ({ name: n })))
-          .returning();
-
-        existing.push(...inserted);
+        .where(inArray(schema.eventTypes.name, input.eventTypes));
+      if (matched.length > 0) {
+        await db.insert(schema.listingEventTypes).values(
+          matched.map((e) => ({ listingId: row.id, eventTypeId: e.id }))
+        );
       }
-
-      await db.insert(schema.listingEventTypes).values(
-        existing.map((e) => ({
-          listingId: listing.id,
-          eventTypeId: e.id,
-        }))
-      );
     }
 
-    return NextResponse.json({ data: listing }, { status: 201 });
-  } catch (error) {
-    return handleApiError(error);
+    return NextResponse.json(
+      { data: { id: row.id, slug: row.slug } },
+      { status: 201 }
+    );
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error: {
+          message: err instanceof Error ? err.message : "Listing creation failed.",
+        },
+      },
+      { status: 500 }
+    );
   }
 }

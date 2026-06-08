@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 
+import { getSupabaseBrowserClient } from "@/lib/auth/client";
+
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -14,14 +16,17 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      // Endpoint always returns 200 to prevent enumeration; we only flip
-      // the UI to "check your email" on a real success.
-      if (!res.ok) {
+      const supabase = getSupabaseBrowserClient();
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+        email,
+        {
+          redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+        }
+      );
+      // Treat any error here as user-facing — Supabase already returns
+      // generic messages on bad input, and we don't surface enumeration risk
+      // because the success path simply flips the UI.
+      if (resetError) {
         setError("Could not send reset email. Please try again shortly.");
         return;
       }

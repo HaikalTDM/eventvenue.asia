@@ -1,140 +1,185 @@
-# EventVenue.Asia — Session Handoff
+# Session Handoff: Phase 3 Migration Complete
 
-## Project Overview
-
-AI-powered event venue marketplace for Southeast Asia (Malaysia-first). Connects customers looking for event venues with venue owners and service providers (catering, photography, DJ, etc.). Halal verification is a key differentiator.
-
-**Tech Stack:** Next.js 15 (App Router), React 19, TypeScript 5, Tailwind CSS 4  
-**Brand Color:** `#EB4D4B` (coral red)  
-**Font:** Inter (Google Fonts)  
-**Backend:** None yet — entirely mock data and localStorage
+**Date:** 2026-05-28
+**Working dir:** `C:\Projects\eventvenue-production` (branch: `production`)
+**Build status:** `npm run build` green (Compiled successfully in ~6s)
 
 ---
 
-## What Has Been Done
+## TL;DR
 
-### Customer Portal (UI Complete)
-- Homepage with hero search (location, date, capacity, halal filter)
-- Venue browsing with grid view + sidebar filters (amenities, event types, halal)
-- Venue detail page: image gallery (large banner), amenities, availability calendar + location map (side by side, full width), reviews, FAQs, booking card, related venues
-- Venue comparison (up to 3 side-by-side with "Best" highlights)
-- Inquiry form modal (date, time, guest count, requirements)
-- Inquiry tracking dashboard with status filters and "Accept Quote" action
-- Favorites/wishlist with localStorage persistence
-- Customer sign-in/sign-up with role toggle ("Planning an event" / "I'm a vendor" → redirects to vendor registration)
-- "List Your Venue" application form with success state
-- Responsive navigation with mobile menu
-- "How it Works" section
-- 404 page
-- Custom loading screen animation (full-screen with brand animation, expanding rings, bouncing dots)
-- Route-level loading states for all major pages
+Phase 1 (Supabase data layer) and Phase 2 (auth + queries + actions +
+storage) were completed previously. This session finished Phase 3:
+every customer-facing form, vendor portal form, and admin surface is now
+wired to React Query hooks or server actions. The legacy `lib/api.ts`
+fetch wrapper, `lib/favorites.tsx` context, `lib/mock-data.ts`,
+`lib/vendor-data.ts`, and `lib/data-mode.tsx` have all been removed.
+`lib/api.ts` survives only as a types module so hooks/pages share a
+single response shape.
 
-### Vendor Portal (UI Fully Interactive)
-- **Registration:** Multi-step vendor registration (account type → business info → personal details → document upload)
-- **Login:** Demo accounts with "Register here" link
-- **Dashboard:** Stats cards (venue vs service provider views), verification badge, quick tips
-- **Listings:**
-  - View all listings with status badges (Active/Paused)
-  - "Add Venue" button → full creation form (basic info, event types, amenities, halal toggle, photos, contact)
-  - "Add Service" button → full creation form (info, category, packages with pricing/unit, tags, portfolio photos)
-  - "Edit" button → pre-populated edit form for existing venues
-  - "Manage Availability" button → interactive calendar to block/unblock dates
-  - "Pause/Unpause" toggle with visual state change
-- **Inquiries:**
-  - Status filters (All / New / Responded / Quoted)
-  - Inline "Respond" form with message textarea
-  - Inline "Send Quote" form with amount, validity period, and notes
-  - Status updates on action (sent → responded → quoted)
-- **Bookings:** Grouped by status (pending, confirmed, in progress, completed, cancelled)
-- **Analytics:** Hardcoded metrics, traffic sources, recent activity
-- **Sidebar navigation:** Role-based display with vendor info and sign out
-
-### Data Layer
-- 8 fully detailed mock venues (Malaysia, Singapore, Bangkok, Jakarta)
-- 8 mock customer inquiries with various statuses
-- 5 mock vendor users (2 venue owners, 3 service providers)
-- 3 mock services, 6 mock vendor bookings
-- Full TypeScript type system (`lib/types.ts`)
+Working tree is dirty — none of this work has been committed yet.
+Build is verified green. The remaining work is cleanup of the auth
+compat shims, RLS migration runner, and polish (a11y / E2E).
 
 ---
 
-## What Needs To Be Done — UI First
+## What landed this session
 
-### Priority 1 — Remaining UI Pages
+### Phase 3 form migrations
 
-- [ ] **Vendor Profile/Settings page** — Edit business profile, change password, notification preferences
-- [ ] **Messaging/Chat UI** — Conversation thread between customer and vendor (inbox + chat view)
-- [ ] **Booking Confirmation flow** — Customer accepts quote → booking confirmed → summary screen
-- [ ] **Forgot Password page** — Email input → success message UI
-- [ ] **Social login buttons** — Currently UI-only (Google, Apple), keep as mock
+- **`components/InquiryFormModal.tsx`** — switched the manual fetch to
+  `useCreateInquiry` from `hooks/use-inquiries.ts`. Loading state now
+  comes from the mutation's `isPending`; cache invalidation flows
+  through React Query so the customer dashboard and vendor inquiries
+  list both refresh on success.
+- **`components/BookingCard.tsx`** — replaced the `setTimeout` mock
+  with `useCreateBooking`. Confirms via `mutateAsync`, redirects to
+  `/dashboard` on success, and gates anonymous clicks to `/sign-in`.
+- **`components/VenueCard.tsx`** — heart icon now reads with
+  `useIsFavorited` and writes with `useToggleFavorite` (both from
+  `hooks/use-favorites.ts`). The legacy `lib/favorites.tsx` context
+  and its `<FavoritesProvider>` wrapper are deleted; `app/layout.tsx`
+  no longer mounts it.
+- **`app/vendor/listings/page.tsx`** — publish/pause/unpause buttons
+  now call `updateListingStatusAction` from `lib/actions/listing.ts`
+  instead of the route handler.
+- **`app/vendor/listings/[id]/edit/page.tsx`** — listing detail load
+  switched from `getListingDetail` to `useListing`. State is hydrated
+  from the React Query cache via a `useEffect` on the returned data.
+- **`app/vendor/listings/[id]/availability/page.tsx`** — same swap;
+  `useListing` replaces the bespoke `getListingDetail` loader.
+- **`app/vendor/settings/page.tsx`** — business profile save now calls
+  `updateVendorProfileAction` from `lib/actions/vendor-profile.ts`.
+  The mock `setTimeout` is gone; profile errors surface inline.
+- **`app/compare/page.tsx`** — list and favorites both read through
+  hooks (`useListings`, `useFavorites`); selection seeds once from
+  localStorage / favorites on first data, then is user-driven.
 
-### Priority 2 — Admin Dashboard (Not Started)
+### Cleanup
 
-- [ ] Admin login / layout with sidebar
-- [ ] Vendor approval workflow (pending vendors list, approve/reject actions)
-- [ ] User management (list customers, vendors, search, suspend)
-- [ ] Content moderation (flagged reviews, reported listings)
-- [ ] Platform analytics (total users, bookings, revenue charts — hardcoded)
-- [ ] Document verification UI (view uploaded halal certs, business licenses, approve/reject)
-
-### Priority 3 — UI Polish & Gaps
-
-- [ ] Error boundaries / error states for failed loads
-- [ ] Empty states for all pages (consistent design)
-- [ ] SEO metadata improvements (per-page titles, descriptions, OG tags)
-- [ ] Skeleton loading states for individual components (cards, lists)
-- [ ] Mobile responsiveness audit and fixes
-- [ ] Accessibility audit (ARIA labels, keyboard navigation, focus states)
-
----
-
-## Backend (To Be Confirmed)
-
-> Backend implementation will be planned separately. Below is a reference of what's needed when ready.
-
-- Set up database (PostgreSQL) with schema/migrations
-- Implement real authentication (NextAuth or similar, JWT)
-- Create API routes / server actions for all CRUD operations
-- Replace all mock data with database queries
-- Environment variables and `.env` setup
-- Real search (MeiliSearch or similar)
-- File/image upload for venue photos
-- Payment gateway (FPX, credit card, e-wallets) — Phase 2
-- Real-time messaging — Phase 2
-- Reviews system (post-booking, verified) — Phase 2
-
----
-
-## Key Files Reference
-
-| Path | Purpose |
-|------|---------|
-| `app/page.tsx` | Homepage |
-| `app/venues/[id]/page.tsx` | Venue detail (SSG) |
-| `app/compare/page.tsx` | Venue comparison |
-| `app/dashboard/` | Customer dashboard (overview, inquiries, favorites) |
-| `app/vendor/` | Vendor portal (all pages) |
-| `app/vendor/register/page.tsx` | Multi-step vendor registration |
-| `app/vendor/listings/new/page.tsx` | Add Venue form |
-| `app/vendor/listings/new-service/page.tsx` | Add Service form |
-| `app/vendor/listings/[id]/edit/page.tsx` | Edit Venue form |
-| `app/vendor/listings/[id]/availability/page.tsx` | Manage Availability calendar |
-| `app/(auth)/` | Sign-in / sign-up pages |
-| `components/LoadingScreen.tsx` | Custom loading animation |
-| `components/` | All UI components |
-| `lib/types.ts` | TypeScript types |
-| `lib/mock-data.ts` | 8 mock venues, inquiries, filter options |
-| `lib/vendor-data.ts` | Mock vendors, services, bookings |
-| `lib/auth.tsx` | Customer auth context (localStorage) |
-| `lib/vendor-auth.tsx` | Vendor auth context (localStorage) |
-| `lib/favorites.tsx` | Favorites context (localStorage) |
+- **Deleted** `lib/favorites.tsx`, `lib/mock-data.ts`,
+  `lib/vendor-data.ts`, `lib/data-mode.tsx`.
+- **Trimmed** `lib/api.ts` to types only (`ApiListing`,
+  `ApiListingDetail`, `ApiInquiry`, etc.). The fetch helpers
+  (`getListings`, `createInquiry`, `addFavorite`, ...) are gone — every
+  consumer now imports from `hooks/*` or `lib/actions/*`.
+- **`app/kael/page.tsx`** — replaced the live/mock data toggle with a
+  static "Live" indicator and a deprecation note. Page-visibility
+  toggles still work.
 
 ---
 
-## Notes
-- All auth is fake (localStorage only). No password hashing, no sessions.
-- Vendor demo accounts exist for testing the portal UI.
-- The app is a **frontend-only prototype** — polished UI but no real data persistence.
-- Custom loading animations added with CSS keyframes (no external animation library).
-- Tailwind CSS v4 is used (CSS-based config in `globals.css`, no `tailwind.config.js`).
-- Next major milestone: complete remaining UI pages, then connect a real backend.
+## Remaining work
+
+### Auth compat shims (low priority)
+
+`lib/auth.tsx` and `lib/vendor-auth.tsx` still exist as compat shims
+that re-export the new `<AuthProvider>` with the legacy method shapes
+(`signIn`, `login`, `updateProfile`, ...). 14 files still import from
+these paths. Migrating them in a follow-up session is mechanical:
+
+```
+# Customer-facing
+app/page.tsx, app/dashboard/layout.tsx, app/dashboard/settings/page.tsx
+components/StickyNav.tsx
+components/{InquiryFormModal,BookingCard,VenueCard}.tsx
+app/compare/page.tsx
+
+# Vendor-facing
+app/vendor/{layout,page,login,settings,bookings,dashboard,analytics}/page.tsx
+app/vendor/listings/page.tsx
+components/VendorPortalLayout.tsx
+```
+
+Plan: replace every `useAuth` from `@/lib/auth` with the new context
+from `@/lib/auth/provider`, and replace `useVendorAuth().vendor` /
+`vendor.vendorName` etc. with `useAuth().user` accesses keyed off
+`role === "vendor"`. Delete both shim files once empty.
+
+### Migrations + DB
+
+- **Drizzle vs manual SQL:** `lib/db/migrations/0000_flowery_luckman.sql`
+  is Drizzle-generated; the manual `lib/db/migrations/manual/0001..0011_*.sql`
+  files cover extensions, triggers, RLS, storage policies. Build a
+  runner script that applies them in order before the next prod deploy.
+- **`is_mock` columns:** every list query in `lib/db/queries/*` defaults
+  to `includeMock=false`. Admin surfaces flip it on. Once the column is
+  dropped via a final migration, delete the `includeMock` plumbing.
+
+### Polish
+
+- Accessibility / Lighthouse pass on the public pages.
+- Set up Playwright + write the smoke E2E suite (sign-in, search,
+  inquiry submit, vendor approve, admin moderate).
+
+---
+
+## Known caveats / gotchas
+
+- **Optimistic mutations:** favorites toggle and message send both use
+  optimistic updates with rollback on error. They don't share state
+  across tabs; a TanStack `Realtime` bridge would close that gap.
+- **`lib/auth.tsx` `updateProfile`:** the shim writes to
+  `/api/v1/users/me` (PATCH) and then calls `refresh()` on the new
+  context. If a settings save appears not to persist, check that the
+  consumer is on the shim and not calling Supabase directly.
+- **`compare` page:** seeds the comparison slots once from
+  localStorage (`ev_mock_favorites`) before falling back to
+  `useFavorites()`. The localStorage key was kept for back-compat with
+  bookmarks shared during demos; it can be removed when E2E lands.
+
+---
+
+## Quick orientation commands
+
+```powershell
+# Confirm git state and recent activity
+git -C C:\Projects\eventvenue-production status
+git -C C:\Projects\eventvenue-production log --oneline -10
+git -C C:\Projects\eventvenue-production diff --stat HEAD
+
+# Re-verify the build
+cd C:\Projects\eventvenue-production
+npm run build
+
+# Look for any stragglers still pointing at the legacy auth shim
+findstr /s /i "from \"@/lib/auth\"" components app
+findstr /s /i "from \"@/lib/vendor-auth\"" components app
+```
+
+Expected current branch state:
+
+```
+* production    e14d8b6 chore(prod): add production deployment config
+  master        633a71f docs: rewrite README ...
+```
+
+Working tree shows ~85 modified files and ~15 untracked dirs (the
+`hooks/`, `lib/actions/`, `lib/auth/`, `lib/db/queries/`,
+`lib/db/migrations/`, `lib/storage/`, `lib/query-provider.tsx`,
+`middleware.ts`, `app/auth/callback/`, `app/api/v1/auth/me/`,
+`app/api/v1/users/`, `SUPABASE_SETUP.md`).
+
+---
+
+## Stack reference
+
+- **Framework:** Next.js 15.5.18 (App Router, Turbopack in dev)
+- **Runtime:** React 19.1.0, Node 20+
+- **DB:** Supabase Postgres via Drizzle ORM 0.45.2 + `postgres` 3.4
+- **Auth:** Supabase Auth via `@supabase/ssr`
+- **Data layer:** TanStack Query 5.62 (React Query)
+- **Validation:** Zod 4
+- **Storage:** Supabase Storage (3 buckets: listings, avatars, documents)
+- **Infra targets:** Supabase (DB + Auth + Storage + Realtime), Cloudflare
+  R2 (legacy, optional), Upstash Redis, Pusher, Resend, Sentry, Axiom
+
+---
+
+## Original Phase 1 deployment notes
+
+The original handoff covered the production clone setup, Docker config,
+security headers, and deploy runbook. Those steps are still valid — see
+`DEPLOYMENT.md` for Vercel / Docker / self-hosted options and
+`.env.production.example` for the secrets template. The deploy story
+itself has not changed; only the application surface area has grown.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useFavorites } from "@/lib/favorites";
+import { useIsFavorited, useToggleFavorite } from "@/hooks/use-favorites";
 import { useAuth } from "@/lib/auth";
 import type { Venue } from "@/lib/types";
 import Link from "next/link";
@@ -12,9 +12,11 @@ interface VenueCardProps {
 }
 
 export default function VenueCard({ venue }: VenueCardProps) {
-  const { isFavorite, toggleFavorite } = useFavorites();
   const { user } = useAuth();
-  const isFavorited = isFavorite(venue.id);
+  const { data: isFavorited = false } = useIsFavorited(venue.id, {
+    enabled: Boolean(user),
+  });
+  const toggleFavorite = useToggleFavorite();
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
 
   const handleFavoriteClick = () => {
@@ -22,7 +24,10 @@ export default function VenueCard({ venue }: VenueCardProps) {
       setShowAuthPrompt(true);
       return;
     }
-    toggleFavorite(venue.id);
+    toggleFavorite.mutate({
+      listingId: venue.id,
+      currentlyFavorited: isFavorited,
+    });
   };
 
   return (

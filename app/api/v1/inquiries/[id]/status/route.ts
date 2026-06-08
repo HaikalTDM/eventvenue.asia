@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { requireUser } from "@/lib/auth/server";
 import { handleApiError, notFound, validationError } from "@/lib/utils/errors";
 import { inquiryStatusSchema } from "@/lib/validators/inquiry.schema";
 import { eq, and } from "drizzle-orm";
 
 const STATUS_TRANSITIONS: Record<string, string[]> = {
   pending: ["accepted", "cancelled"],
-  accepted: ["approved", "cancelled"],
-  approved: ["proceed", "cancelled"],
-  proceed: ["ongoing", "cancelled"],
-  ongoing: ["completed", "cancelled"],
+  accepted: ["completed", "cancelled"],
   completed: [],
   cancelled: [],
 };
@@ -21,10 +18,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireUser();
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const inquiry = await db.query.inquiries.findFirst({
       where: (i) => eq(i.id, id),
@@ -36,7 +32,7 @@ export async function GET(
     });
 
     const isOwner = user.role === "vendor" && listing?.vendorId === user.vendorId;
-    const isCustomer = inquiry.customerId === user.sub;
+    const isCustomer = inquiry.customerId === user.id;
     const isAdmin = user.role === "admin";
 
     if (!isOwner && !isCustomer && !isAdmin) {
@@ -55,10 +51,9 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireUser();
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const inquiry = await db.query.inquiries.findFirst({
       where: (i) => eq(i.id, id),
@@ -70,7 +65,7 @@ export async function PUT(
     });
 
     const isOwner = user.role === "vendor" && listing?.vendorId === user.vendorId;
-    const isCustomer = inquiry.customerId === user.sub;
+    const isCustomer = inquiry.customerId === user.id;
     const isAdmin = user.role === "admin";
 
     if (!isOwner && !isCustomer && !isAdmin) {

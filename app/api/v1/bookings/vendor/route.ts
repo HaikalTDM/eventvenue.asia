@@ -1,25 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { requireRole } from "@/lib/auth/server";
 import { handleApiError } from "@/lib/utils/errors";
 import { eq } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    if (!user || user.role !== "vendor") {
-      return NextResponse.json({ error: { code: "FORBIDDEN" } }, { status: 403 });
-    }
+    const userOrResp = await requireRole("vendor");
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
-    const vendorProfile = await db.query.vendorProfiles.findFirst({
-      where: (vp) => eq(vp.userId, user.sub),
-    });
-    if (!vendorProfile) {
+    if (!user.vendorId) {
       return NextResponse.json({ error: { code: "NOT_FOUND" } }, { status: 404 });
     }
 
     const vendorListings = await db.query.listings.findMany({
-      where: (l) => eq(l.vendorId, vendorProfile.id),
+      where: (l) => eq(l.vendorId, user.vendorId!),
     });
     const listingIds = vendorListings.map((l) => l.id);
 

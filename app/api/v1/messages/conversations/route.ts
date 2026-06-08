@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
-import { authenticate } from "@/lib/auth/middleware";
+import { requireUser } from "@/lib/auth/server";
 import { handleApiError, notFound } from "@/lib/utils/errors";
 import { eq, and, desc } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireUser();
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const conversations = await db
       .select()
       .from(schema.conversationParticipants)
       .innerJoin(schema.conversations, eq(schema.conversationParticipants.conversationId, schema.conversations.id))
-      .where(eq(schema.conversationParticipants.userId, user.sub))
+      .where(eq(schema.conversationParticipants.userId, user.id))
       .orderBy(desc(schema.conversations.createdAt));
 
     const conversationIds = conversations.map((c) => c.conversations.id);
@@ -48,10 +47,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const { user } = await authenticate(request);
-    if (!user) {
-      return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    const userOrResp = await requireUser();
+    if (userOrResp instanceof NextResponse) return userOrResp;
+    const user = userOrResp;
 
     const body = await request.json();
     const { type, title, participantIds } = body;
@@ -64,7 +62,7 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
-    const allParticipants = [...new Set([user.sub, ...(participantIds || [])])];
+    const allParticipants = [...new Set([user.id, ...(participantIds || [])])];
     await db.insert(schema.conversationParticipants).values(
       allParticipants.map((uid) => ({
         conversationId: conversation.id,

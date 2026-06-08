@@ -1,15 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 
-interface DashboardStats {
-  users: number;
-  vendors: number;
-  listings: number;
-  pendingVendors: number;
-  bookings: number;
-}
+import { useAdminDashboard } from "@/hooks/use-admin";
 
 const ICONS = {
   users:
@@ -28,31 +21,7 @@ function formatNumber(n: number | undefined | null): string {
 }
 
 export default function AdminDashboardPage() {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/v1/admin/dashboard", { cache: "no-store" });
-        if (!res.ok) {
-          if (!cancelled) setError("Could not load platform stats.");
-          return;
-        }
-        const json = await res.json();
-        if (!cancelled) setStats(json.data as DashboardStats);
-      } catch {
-        if (!cancelled) setError("Network error while loading stats.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: stats, isLoading: loading, error } = useAdminDashboard();
 
   const cards = [
     { key: "users", label: "Total Users", value: stats?.users, icon: ICONS.users },
@@ -81,7 +50,7 @@ export default function AdminDashboardPage() {
 
       {error && (
         <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          {error}
+          {error.message}
         </div>
       )}
 

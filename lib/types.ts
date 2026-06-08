@@ -45,10 +45,8 @@ export type Venue = {
 };
 
 export type InquiryStatus =
-  | "accept"
-  | "approve"
-  | "proceed"
-  | "ongoing"
+  | "pending"
+  | "accepted"
   | "completed"
   | "cancelled";
 
