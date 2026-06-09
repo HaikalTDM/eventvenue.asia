@@ -1,12 +1,54 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/server";
 import { listListings } from "@/lib/db/queries/listings";
 import { db, schema } from "@/lib/db";
 import { listingCreateSchema } from "@/lib/validators/listing.schema";
+
+type Facet = { id: number; name: string; count: number };
+
+/**
+ * Build the sidebar filter facets (amenities + event types) for a set of
+ * listings, each with a count of how many of those listings carry it. Powers
+ * the discovery sidebar — without this the filter sections render empty.
+ */
+async function buildFacets(
+  listingIds: string[]
+): Promise<{ amenities: Facet[]; eventTypes: Facet[] }> {
+  if (listingIds.length === 0) {
+    return { amenities: [], eventTypes: [] };
+  }
+
+  const [amenityRows, eventTypeRows] = await Promise.all([
+    db
+      .select({
+        id: schema.amenities.id,
+        name: schema.amenities.name,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(schema.listingAmenities)
+      .innerJoin(schema.amenities, eq(schema.listingAmenities.amenityId, schema.amenities.id))
+      .where(inArray(schema.listingAmenities.listingId, listingIds))
+      .groupBy(schema.amenities.id, schema.amenities.name)
+      .orderBy(schema.amenities.name),
+    db
+      .select({
+        id: schema.eventTypes.id,
+        name: schema.eventTypes.name,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(schema.listingEventTypes)
+      .innerJoin(schema.eventTypes, eq(schema.listingEventTypes.eventTypeId, schema.eventTypes.id))
+      .where(inArray(schema.listingEventTypes.listingId, listingIds))
+      .groupBy(schema.eventTypes.id, schema.eventTypes.name)
+      .orderBy(schema.eventTypes.name),
+  ]);
+
+  return { amenities: amenityRows, eventTypes: eventTypeRows };
+}
 
 /**
  * GET /api/v1/listings
@@ -103,14 +145,40 @@ export async function GET(request: NextRequest) {
         )
       );
     const photoByListingId = new Map(photos.map((p) => [p.listingId, { url: p.url, altText: p.altText }]));
-    const enriched = rows.map((r) => ({
-      ...r,
-      primaryPhoto: photoByListingId.get(r.id) ?? null,
-    }));
-    return NextResponse.json({ data: enriched, total });
+
+    // Batch the owning vendor profile for each listing so grid cards can show
+    // the business name, verification badge, and (for services) the category
+    // without an N+1 per card. serviceCategory lives on vendor_profiles, not
+    // on the listing row, so it must be joined in here.
+    const vendorIds = [...new Set(rows.map((r) => r.vendorId))];
+    const vendors = await db
+      .select({
+        id: schema.vendorProfiles.id,
+        businessName: schema.vendorProfiles.businessName,
+        verificationBadge: schema.vendorProfiles.verificationBadge,
+        serviceCategory: schema.vendorProfiles.serviceCategory,
+      })
+      .from(schema.vendorProfiles)
+      .where(inArray(schema.vendorProfiles.id, vendorIds));
+    const vendorById = new Map(vendors.map((v) => [v.id, v]));
+
+    const enriched = rows.map((r) => {
+      const v = vendorById.get(r.vendorId);
+      return {
+        ...r,
+        primaryPhoto: photoByListingId.get(r.id) ?? null,
+        serviceCategory: v?.serviceCategory ?? null,
+        vendor: v
+          ? { businessName: v.businessName, verificationBadge: v.verificationBadge }
+          : null,
+      };
+    });
+
+    const filters = await buildFacets(ids);
+    return NextResponse.json({ data: enriched, total, filters });
   }
 
-  return NextResponse.json({ data: rows, total });
+  return NextResponse.json({ data: rows, total, filters: { amenities: [], eventTypes: [] } });
 }
 
 function generateSlug(title: string): string {

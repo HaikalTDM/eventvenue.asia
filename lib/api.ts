@@ -27,6 +27,7 @@ export interface ApiListing {
   status?: "active" | "paused" | "draft";
   primaryPhoto: { url: string; altText: string | null } | null;
   vendor: { businessName: string; verificationBadge: string } | null;
+  serviceCategory?: string | null;
   amenities: string[];
   eventTypes: string[];
   createdAt: string;

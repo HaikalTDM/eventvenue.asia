@@ -17,6 +17,16 @@ const CATEGORY_ICONS: Record<string, string> = {
   decoration: "\uD83C\uDFA8",
   makeup: "\uD83D\uDC84",
   planning: "\uD83D\uDCCB",
+  photobooth: "\uD83D\uDCF8",
+  ice_cream: "\uD83C\uDF66",
+  florist: "\uD83D\uDC90",
+  cake: "\uD83C\uDF82",
+  transport: "\uD83D\uDE97",
+  emcee: "\uD83C\uDFA4",
+  live_band: "\uD83C\uDFB8",
+  lighting: "\uD83D\uDCA1",
+  bridal: "\uD83D\uDC70",
+  henna: "\u270B",
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -27,6 +37,16 @@ const CATEGORY_LABELS: Record<string, string> = {
   decoration: "Decoration",
   makeup: "Makeup & Styling",
   planning: "Event Planning",
+  photobooth: "Photobooth Rental",
+  ice_cream: "Ice Cream Catering",
+  florist: "Florist & Bouquets",
+  cake: "Cake & Desserts",
+  transport: "Bridal Car & Transport",
+  emcee: "Emcee / Host",
+  live_band: "Live Band",
+  lighting: "Lighting & Sound",
+  bridal: "Bridal Wear & Rental",
+  henna: "Henna / Inai Art",
 };
 
 export default function ServiceRecommendationCard({ scoredService, isSelected, onToggleSelect }: ServiceRecommendationCardProps) {

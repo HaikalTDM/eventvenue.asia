@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import StickyNav from "@/components/StickyNav";
 import HeroSearch from "@/components/HeroSearch";
@@ -8,6 +9,7 @@ import AIPlannerInput from "@/components/AIPlannerInput";
 import PlanLoading from "@/components/PlanLoading";
 import PlanResults from "@/components/PlanResults";
 import VenueGridWithFilters from "@/components/VenueGridWithFilters";
+import ServicesSection from "@/components/ServicesSection";
 import HowItWorks from "@/components/HowItWorks";
 import Footer from "@/components/Footer";
 import type { SearchState, PlanResponse } from "@/lib/types";
@@ -22,7 +24,7 @@ const defaultSearchState: SearchState = {
 type PlannerTab = "filters" | "ai";
 
 export default function HomePage() {
-  const { user, signIn, signOut } = useAuth();
+  const { user, signIn } = useAuth();
   const [search, setSearch] = useState<SearchState>(defaultSearchState);
   const [activeTab, setActiveTab] = useState<PlannerTab>("filters");
   const [isLoading, setIsLoading] = useState(false);
@@ -76,29 +78,6 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <StickyNav />
-      <div className="bg-white border-b border-gray-100">
-        <div className="container-custom flex items-center justify-end py-2">
-          <button
-            type="button"
-            onClick={() => {
-              if (user) {
-                signOut();
-              } else {
-                signIn("sarah@email.com", "Sarah Lim");
-              }
-            }}
-            className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-medium transition-all ${
-              user
-                ? "bg-blue-50 text-blue-700 border border-blue-200"
-                : "bg-gray-100 text-gray-500 border border-gray-200"
-            }`}
-          >
-            <span className="font-mono text-[10px]">🔬</span>
-            Auth Test: {user ? "Signed In" : "Signed Out"}
-            {user && <span className="text-blue-400">({user.name})</span>}
-          </button>
-        </div>
-      </div>
       <main>
         {activeTab === "filters" ? (
           <>
@@ -185,15 +164,17 @@ export default function HomePage() {
                       <p className="mt-2 text-sm text-gray-500">
                         The EventVenue Smart Planner is available to registered users. Sign in to start planning your event.
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => signIn("sarah@email.com", "Sarah Lim")}
-                        className="mt-5 w-full rounded-xl bg-[#EB4D4B] px-6 py-3 text-sm font-bold text-white shadow-md shadow-[#EB4D4B]/25 transition-all hover:bg-[#dc2626] hover:shadow-lg"
+                      <Link
+                        href="/sign-in"
+                        className="mt-5 inline-block w-full rounded-xl bg-[#EB4D4B] px-6 py-3 text-sm font-bold text-white shadow-md shadow-[#EB4D4B]/25 transition-all hover:bg-[#dc2626] hover:shadow-lg"
                       >
                         Sign In to Continue
-                      </button>
+                      </Link>
                       <p className="mt-3 text-xs text-gray-400">
-                        Demo account will be auto-filled
+                        New here?{" "}
+                        <Link href="/sign-up" className="font-semibold text-[#EB4D4B] hover:underline">
+                          Create an account
+                        </Link>
                       </p>
                     </div>
                   </div>
@@ -227,6 +208,8 @@ export default function HomePage() {
         )}
 
         <VenueGridWithFilters search={search} />
+
+        <ServicesSection />
 
         <HowItWorks />
       </main>

@@ -19,6 +19,16 @@ const SERVICE_LABELS: Record<string, string> = {
   decoration: "Decoration",
   makeup: "Makeup & Styling",
   planning: "Event Planning",
+  photobooth: "Photobooth Rental",
+  ice_cream: "Ice Cream Catering",
+  florist: "Florist & Bouquets",
+  cake: "Cake & Desserts",
+  transport: "Bridal Car & Transport",
+  emcee: "Emcee / Host",
+  live_band: "Live Band",
+  lighting: "Lighting & Sound",
+  bridal: "Bridal Wear & Rental",
+  henna: "Henna / Inai Art",
 };
 
 export default function PlanResults({ data }: PlanResultsProps) {

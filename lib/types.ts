@@ -90,7 +90,17 @@ export type ServiceCategory =
   | "decoration"
   | "dj_entertainment"
   | "makeup"
-  | "planning";
+  | "planning"
+  | "photobooth"
+  | "ice_cream"
+  | "florist"
+  | "cake"
+  | "transport"
+  | "emcee"
+  | "live_band"
+  | "lighting"
+  | "bridal"
+  | "henna";
 
 export type ServicePackage = {
   id: string;

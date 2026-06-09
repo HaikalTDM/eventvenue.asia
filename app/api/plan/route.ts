@@ -1,9 +1,31 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
 import { extractPlanFromPrompt } from "@/lib/nlp-extractor";
+import { extractPlanWithAi, AiExtractionError } from "@/lib/ai-extractor";
 import { generatePlan } from "@/lib/plan-engine";
 import { eq } from "drizzle-orm";
-import type { Venue, Service, PlanResponse, Review, FAQ } from "@/lib/types";
+import type { Venue, Service, PlanResponse, PlanExtraction, Review, FAQ } from "@/lib/types";
+
+/**
+ * Resolve the plan extraction, preferring AI tool-calling and transparently
+ * falling back to the regex NLP extractor when the AI path fails for a
+ * recoverable reason (no API key, token/quota limits, or service unavailability).
+ * The regex extractor is synchronous and never throws, so it is a safe backstop.
+ */
+async function resolveExtraction(prompt: string): Promise<PlanExtraction> {
+  try {
+    return await extractPlanWithAi(prompt);
+  } catch (err) {
+    if (err instanceof AiExtractionError && err.recoverable) {
+      console.warn(`[plan] AI extraction fell back to NLP (${err.reason}): ${err.message}`);
+      return extractPlanFromPrompt(prompt);
+    }
+    // Unexpected/non-recoverable error: still degrade gracefully to NLP rather
+    // than failing the whole request, but log it at error level for visibility.
+    console.error("[plan] Unexpected AI extraction error; using NLP fallback:", err);
+    return extractPlanFromPrompt(prompt);
+  }
+}
 
 async function fetchVenuesAndServices(): Promise<{ venues: Venue[]; services: Service[] }> {
   const listings = await db.query.listings.findMany({
@@ -152,7 +174,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const extraction = extractPlanFromPrompt(prompt.trim());
+    const extraction = await resolveExtraction(prompt.trim());
     const { venues, services } = await fetchVenuesAndServices();
     const plan = generatePlan(extraction, venues, services);
 

@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useCreateInquiry } from "@/hooks/use-inquiries";
 import CustomDatePicker from "@/components/CustomDatePicker";
 import CustomTimePicker from "@/components/CustomTimePicker";
+import { normalizePhone } from "@/lib/utils/whatsapp";
 
 interface InquiryFormModalProps {
   isOpen: boolean;
@@ -76,9 +77,30 @@ export default function InquiryFormModal({
       return;
     }
 
+    // Phone is the handoff channel: the vendor contacts the customer on
+    // WhatsApp using this number, so it must be present and well-formed.
+    if (!normalizePhone(customerPhone)) {
+      setError("Please enter a valid phone number — the venue will contact you on WhatsApp.");
+      return;
+    }
+
     const estimatedCost = Math.max(3, parseInt(endTime, 10) - parseInt(startTime, 10)) * pricePerHour;
 
     try {
+      // Persist the phone to the customer's profile first; the vendor's
+      // inquiry view reads users.phone to build the WhatsApp link. Skip the
+      // round-trip when it already matches what's on file.
+      if (customerPhone.trim() && customerPhone.trim() !== (user.phone ?? "")) {
+        const res = await fetch("/api/v1/users/me", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: customerPhone.trim() }),
+        });
+        if (!res.ok) {
+          throw new Error("Could not save your phone number. Please try again.");
+        }
+      }
+
       await createInquiry.mutateAsync({
         listingId: venueId,
         eventDate,
@@ -124,8 +146,10 @@ export default function InquiryFormModal({
           </div>
           <h2 className="text-xl font-bold text-gray-900">Inquiry Sent!</h2>
           <p className="mt-2 text-sm text-gray-500">
-            Your inquiry has been sent to the venue host. You can track its status
-            in your{" "}
+            Your inquiry has been sent to the venue host. They&apos;ll reach out
+            to you directly on{" "}
+            <span className="font-semibold text-green-600">WhatsApp</span> — you
+            can also track its status in your{" "}
             <span className="font-semibold text-[#EB4D4B]">Dashboard</span>.
           </p>
           <button
@@ -228,15 +252,19 @@ export default function InquiryFormModal({
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-gray-700">
-                  Phone
+                  Phone (WhatsApp) <span className="text-[#EB4D4B]">*</span>
                 </label>
                 <input
                   type="tel"
+                  required
                   value={customerPhone}
                   onChange={(e) => setCustomerPhone(e.target.value)}
                   placeholder="+60 12 345 6789"
                   className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-900 placeholder-gray-400 outline-none transition focus:border-[#EB4D4B] focus:ring-2 focus:ring-[#EB4D4B]/20"
                 />
+                <p className="mt-1 text-xs text-gray-400">
+                  The venue will reply to you on WhatsApp, so make sure this number is correct.
+                </p>
               </div>
             </div>
 

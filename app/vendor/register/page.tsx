@@ -15,6 +15,16 @@ const serviceCategories: { value: ServiceCategory; label: string }[] = [
   { value: "dj_entertainment", label: "DJ & Entertainment" },
   { value: "makeup", label: "Makeup & Styling" },
   { value: "planning", label: "Event Planning" },
+  { value: "photobooth", label: "Photobooth Rental" },
+  { value: "ice_cream", label: "Ice Cream Catering" },
+  { value: "florist", label: "Florist & Bouquets" },
+  { value: "cake", label: "Cake & Desserts" },
+  { value: "transport", label: "Bridal Car & Transport" },
+  { value: "emcee", label: "Emcee / Host" },
+  { value: "live_band", label: "Live Band" },
+  { value: "lighting", label: "Lighting & Sound" },
+  { value: "bridal", label: "Bridal Wear & Rental" },
+  { value: "henna", label: "Henna / Inai Art" },
 ];
 
 export default function VendorRegisterPage() {
